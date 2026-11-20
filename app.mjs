@@ -456,8 +456,10 @@ scrubber.addEventListener('input', () => {
 });
 
 window.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+  const k = e.key.toLowerCase();
   if (e.code === 'Space') {
     if (tag === 'BUTTON') return;
     e.preventDefault();
@@ -466,12 +468,35 @@ window.addEventListener('keydown', (e) => {
     if (!btnPrev.disabled) btnPrev.click();
   } else if (e.code === 'ArrowRight') {
     if (!btnNext.disabled) btnNext.click();
-  } else if (e.key === 'r' || e.key === 'R') {
-    viewer.resetCamera();
-  } else if (e.key === 'f' || e.key === 'F') {
-    get('btn-fullscreen')?.click();
   } else if (e.key === 'Escape') {
-    get('bracket-modal')?.classList.add('hidden');
+    bracketModal?.classList.add('hidden');
+  } else if (k === 'b') {
+    if (tourney && bracketModal) {
+      if (bracketModal.classList.contains('hidden')) {
+        renderBracketModal();
+        bracketModal.classList.remove('hidden');
+      } else {
+        bracketModal.classList.add('hidden');
+      }
+    }
+  } else if (k === 'f') {
+    get('btn-fullscreen')?.click();
+  } else if (k === 'v') {
+    get('btn-view')?.click();
+  } else if (k === 'c') {
+    get('btn-autocam')?.click();
+  } else if (k === 's') {
+    get('btn-sight')?.click();
+  } else if (k === 'd') {
+    get('btn-danger')?.click();
+  } else if (k === 'r') {
+    viewer.resetCamera();
+  } else if (k === 'm') {
+    get('btn-bgm-toggle')?.click();
+  } else if (k === 'n') {
+    get('btn-bgm-next')?.click();
+  } else if (k === 'x') {
+    get('btn-sfx')?.click();
   }
 });
 
