@@ -27,6 +27,23 @@ In **Single 1v1 Match**, upload your strategy once. Choose **Mirror** to face a 
 
 Random and TS Starter come from the bundled [official simulator](https://victrisarena.com/guide/simulator). Pursuit is a local opponent that closes distance and fires every fourth tick. The starter’s label gives the dated raw rating for the matching `house-ts-starter` version (`starter-17`) from the [public ladder API](https://victrisarena.com/api/leaderboard). In local simulator 0.85.0 tests on seeds 0–23 with both seat orders, TS Starter beat Pursuit and Random in all 48 games per pairing, and Pursuit beat Random in all 48.
 
+## Agent Self-Training (RSI) Lab
+
+Use `bench.mjs` to run fast headless benchmarks (works with both `.ts` and `.py` bots) and feed structured JSON diagnostics straight to a coding agent for iterative self-improvement (see [AGENTS.md](AGENTS.md)):
+
+```bash
+# Benchmark against the 3-bot panel (swapped seats across maps)
+node bench.mjs ts-bot/strategy.ts --panel --games 12
+
+# Pit a new version against an older version or another bot with JSON telemetry
+node bench.mjs my-v2.ts my-v1.ts --games 20 --seed 100 --json
+
+# Self-play mirror test (supports Python bots too!)
+node bench.mjs py-bot/strategy.py --mirror --games 10 --json
+```
+
+Each JSON report includes win rates by seat & map (`arena-21`, `columns-21`, `pillars-21`), per-weapon accuracy, pickups, wall-slams, `takenBySource`, `rejectedTurns`, and `worstLosses` seeds you can replay live in the browser UI.
+
 ## Bot Submission Rules
 
 * **TypeScript (`.ts`):** Standalone file under 256 KiB exporting a synchronous `decide(obs, match)` using type syntax Node can strip (no external imports).
