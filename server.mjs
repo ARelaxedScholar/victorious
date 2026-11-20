@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT_DIR = fileURLToPath(new URL('.', import.meta.url));
 const BGM_DIR = process.env.BGM_DIR || join(ROOT_DIR, 'bgm');
+const SPRITES_DIR = join(ROOT_DIR, 'sprites');
+const SPRITE_FILE_RE = /^(front|back|shiny)-\d+\.png$/;
 
 const files = {
   '/': ['index.html', 'text/html'],
@@ -108,6 +110,14 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify(bgmCatalog.map(({ id, title }) => ({ id, title, url: `/bgm/${id}` }))));
     } else if (req.method === 'GET' && req.url.startsWith('/bgm/') && bgmById.has(req.url.slice(5))) {
       await serveAudio(req, res, bgmById.get(req.url.slice(5)));
+    } else if (req.method === 'GET' && req.url.startsWith('/sprites/') && SPRITE_FILE_RE.test(req.url.slice(9))) {
+      const spritePath = join(SPRITES_DIR, req.url.slice(9));
+      if (!existsSync(spritePath)) {
+        res.writeHead(404).end();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' });
+      res.end(await readFile(spritePath));
     } else if (req.method === 'GET' && req.url.startsWith('/python/') && Object.hasOwn(pythonAssets, req.url.slice(8))) {
       res.writeHead(200, { 'Content-Type': pythonAssets[req.url.slice(8)], 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'no-store' });
       res.end(await readFile(new URL('.' + req.url, import.meta.url)));

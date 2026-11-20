@@ -1,4 +1,5 @@
 bgm/
+sprites/
 *.zip
 __pycache__/
 *.pyc

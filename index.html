@@ -104,6 +104,17 @@ iframe{display:none}
 .moments button{display:grid;gap:3px;text-align:left;border-left:3px solid #818cf8}
 .moments small{color:#a5b4fc;font-variant-numeric:tabular-nums}
 #comparison{font-size:.85rem;color:#bae6fd}
+.check-badge{font-size:.7rem;font-weight:800;padding:2px 6px;border-radius:5px}
+.check-ok{background:rgba(34,197,94,.2);color:#86efac;border:1px solid rgba(34,197,94,.45)}
+.check-err{background:rgba(239,68,68,.22);color:#fca5a5;border:1px solid rgba(239,68,68,.5);cursor:help}
+.roster-row{grid-template-columns:1fr 94px auto auto auto}
+.bracket-modal{position:fixed;inset:0;z-index:50;background:rgba(4,8,18,.96);backdrop-filter:blur(8px);padding:26px 32px;overflow:auto;display:flex;flex-direction:column;gap:18px}
+.bracket-modal-head{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;border-bottom:1px solid #24334f;padding-bottom:14px}
+.bracket-cols{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(260px,1fr);gap:22px;align-items:start}
+.bracket-col{background:#0f182b;border:1px solid #24334f;border-radius:14px;padding:14px}
+.bracket-col h3{margin-top:0;font-size:.95rem}
+.bracket-col .match-card{font-size:.94rem;padding:11px 13px;margin-bottom:10px}
+.restore-bar{background:rgba(56,189,248,.12);border:1px solid rgba(56,189,248,.45);border-radius:10px;padding:9px 12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:.84rem}
 </style>
 <main>
   <h1>Victorious</h1>
@@ -141,6 +152,13 @@ iframe{display:none}
 
       <!-- TOURNAMENT MODE PANEL -->
       <div id="pane-tournament">
+        <div id="restore-bar" class="restore-bar hidden">
+          <span>Saved tournament found.</span>
+          <span style="display:flex;gap:6px">
+            <button id="btn-restore-tourney" type="button" style="padding:4px 10px;font-size:.78rem">♻ Restore</button>
+            <button id="btn-discard-tourney" class="secondary" type="button" style="padding:4px 8px;font-size:.78rem">✕</button>
+          </span>
+        </div>
         <section>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <h2 style="margin:0">1. Bot Roster (<span id="roster-count">0</span>)</h2>
@@ -172,6 +190,7 @@ iframe{display:none}
           </div>
 
           <div class="actions" style="margin-top:12px">
+            <button id="btn-precheck" class="secondary" type="button" disabled title="Run a fast 5-tick sandbox smoke test on every uploaded bot">🧪 Pre-Check Bots</button>
             <button id="btn-start-tourney" type="button" disabled>Start Tournament</button>
             <button id="btn-reset-tourney" class="secondary hidden" type="button">Reset Bracket</button>
           </div>
@@ -182,6 +201,8 @@ iframe{display:none}
           <div class="actions" style="margin:0 0 12px">
             <button id="btn-next-match" type="button">▶ Run Next Match (Live)</button>
             <button id="btn-sim-round" class="secondary" type="button">⚡ Sim Round (Instant)</button>
+            <button id="btn-show-bracket" class="secondary" type="button" title="Projector-friendly fullscreen bracket">🏆 Show Bracket</button>
+            <button id="btn-export-tourney" class="secondary" type="button" title="Download tournament results JSON">💾 Export</button>
           </div>
           <div id="standings-slot"></div>
           <div id="bracket-slot"></div>
@@ -332,4 +353,19 @@ iframe{display:none}
     </section>
   </div>
 </main>
+<div id="bracket-modal" class="bracket-modal hidden" role="dialog" aria-label="Tournament Bracket">
+  <div class="bracket-modal-head">
+    <div>
+      <h1 style="margin:0;font-size:1.8rem">🏆 Victorious Tournament Bracket</h1>
+      <p id="modal-sub" style="margin:2px 0 0"></p>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center">
+      <button id="btn-modal-next" type="button">▶ Run Next Match</button>
+      <button id="btn-close-bracket" class="secondary" type="button">✕ Close (Esc)</button>
+    </div>
+  </div>
+  <div id="modal-champ"></div>
+  <div id="modal-standings"></div>
+  <div id="modal-cols" class="bracket-cols"></div>
+</div>
 <script type="module" src="/app.mjs"></script>

@@ -1,14 +1,16 @@
 import { panel } from './practice.mjs';
-import { Game, encodeReplay, verifyReplay } from './arena-sim.mjs';
+import { Game, HOUSE_BOTS, encodeReplay, verifyReplay } from './arena-sim.mjs';
 import { captureFrame, createArenaViewer } from './viewer.mjs';
 import { createAudioEngine } from './audio.mjs';
 import {
   createTournament,
   defaultAvatar,
+  deserializeTournament,
   getActiveRoundPendingMatches,
   getNextPendingMatch,
   getStandings,
   recordMatchResult,
+  serializeTournament,
 } from './tournament.mjs';
 
 const get = (id) => document.getElementById(id);
@@ -468,6 +470,8 @@ window.addEventListener('keydown', (e) => {
     viewer.resetCamera();
   } else if (e.key === 'f' || e.key === 'F') {
     get('btn-fullscreen')?.click();
+  } else if (e.key === 'Escape') {
+    get('bracket-modal')?.classList.add('hidden');
   }
 });
 
@@ -634,7 +638,10 @@ async function runGame(teams, seed, gameNumber, { forceInstant = false } = {}) {
       const frame = captureFrame(obs1, obs2);
       frames.push(frame);
 
-      const delay = (forceInstant || liveSkip) ? 0 : getTickDelayMs();
+      const baseDelay = (forceInstant || liveSkip) ? 0 : getTickDelayMs();
+      // Dramatic KO Slow-Mo when either fighter enters critical HP (<= 24) during live play!
+      const criticalHp = Math.min(obs1.self.hp, obs2.self.hp) <= 24;
+      const delay = baseDelay > 0 && criticalHp ? Math.max(Math.round(baseDelay * 2.1), 135) : baseDelay;
       if (delay > 0 || frame.tick % 12 === 0) {
         viewer.render(frame, delay, false);
       }
@@ -882,14 +889,39 @@ const dropzone = get('dropzone');
 const rosterInput = get('roster-files');
 const rosterList = get('roster-list');
 const rosterCount = get('roster-count');
+const btnPrecheck = get('btn-precheck');
 const btnStartTourney = get('btn-start-tourney');
 const btnResetTourney = get('btn-reset-tourney');
 const tourneyBoard = get('tourney-board');
 const btnNextMatch = get('btn-next-match');
 const btnSimRound = get('btn-sim-round');
+const btnShowBracket = get('btn-show-bracket');
+const btnExportTourney = get('btn-export-tourney');
+const bracketModal = get('bracket-modal');
+const restoreBar = get('restore-bar');
 const standingsSlot = get('standings-slot');
 const bracketSlot = get('bracket-slot');
 const championSlot = get('champion-slot');
+const STORAGE_KEY = 'victorious_tournament_v1';
+
+function saveTournamentState() {
+  if (!tourney) return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializeTournament(tourney)));
+  } catch {}
+}
+
+function clearSavedTournament() {
+  try { localStorage.removeItem(STORAGE_KEY); } catch {}
+  restoreBar?.classList.add('hidden');
+}
+
+function checkSavedTournament() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw && !tourney) restoreBar?.classList.remove('hidden');
+  } catch {}
+}
 
 const AVATAR_OPTS = [
   ['pikachu', '⚡ Pikachu'],
@@ -919,6 +951,7 @@ function uniqueTeamName(base) {
 function renderRoster() {
   rosterCount.textContent = String(roster.length);
   btnStartTourney.disabled = roster.length < 2 || Boolean(tourney);
+  if (btnPrecheck) btnPrecheck.disabled = roster.length < 1 || Boolean(tourney) || busy;
   rosterList.innerHTML = '';
   roster.forEach((bot, idx) => {
     const row = document.createElement('div');
@@ -945,6 +978,17 @@ function renderRoster() {
     badge.className = 'lang-badge' + (bot.language === 'python' ? ' py' : '');
     badge.textContent = bot.language === 'python' ? 'PY' : 'TS';
 
+    const chk = document.createElement('span');
+    if (bot.check?.ok) {
+      chk.className = 'check-badge check-ok';
+      chk.textContent = `✓ ${bot.check.ms}ms`;
+      chk.title = 'Passed 5-tick sandbox smoke test';
+    } else if (bot.check && !bot.check.ok) {
+      chk.className = 'check-badge check-err';
+      chk.textContent = '✕ Fail';
+      chk.title = bot.check.error;
+    }
+
     const del = document.createElement('button');
     del.type = 'button';
     del.className = 'danger';
@@ -956,10 +1000,57 @@ function renderRoster() {
       renderRoster();
     });
 
-    row.append(nameIn, sel, badge, del);
+    row.append(nameIn, sel, badge, chk, del);
     rosterList.append(row);
   });
 }
+
+async function precheckBot(bot) {
+  const game = new Game({ seed: 7 });
+  const worker = isolate(bot);
+  try {
+    await worker.ready;
+    const hello1 = game.hello(1);
+    const match1 = { ...hello1, id: hello1.match_id };
+    const randTurn = HOUSE_BOTS.random.start(game.hello(2));
+    const t0 = performance.now();
+    for (let tick = 0; tick < 5 && !game.over; tick++) {
+      const obs1 = game.next(1);
+      const obs2 = game.next(2);
+      const turn1 = await worker.turn(obs1, match1);
+      const turn2 = randTurn(obs2);
+      game.step({ 1: turn1, 2: turn2 });
+    }
+    return { ok: true, ms: Math.max(1, Math.round(performance.now() - t0)) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  } finally {
+    worker.close();
+  }
+}
+
+btnPrecheck?.addEventListener('click', async () => {
+  if (busy || tourney || !roster.length) return;
+  busy = true;
+  renderRoster();
+  let passed = 0;
+  let failed = 0;
+  try {
+    for (const bot of roster) {
+      status.textContent = `Pre-checking ${bot.name} (${bot.language})…`;
+      bot.check = await precheckBot(bot);
+      if (bot.check.ok) passed++;
+      else failed++;
+      renderRoster();
+    }
+    status.textContent = failed === 0
+      ? `✓ All ${passed} bots passed the 5-tick sandbox smoke test!`
+      : `Pre-check complete: ${passed} passed, ${failed} failed (hover ✕ Fail for details).`;
+  } finally {
+    busy = false;
+    renderRoster();
+  }
+});
 
 async function addFilesToRoster(fileList) {
   if (tourney) return;
@@ -1128,7 +1219,95 @@ function renderTournamentBoard() {
   btnNextMatch.textContent = nextMatch
     ? `▶ ${nextMatch.isFinal ? 'Play Grand Final (Bo3)' : `Next: ${nextMatch.teamA.name} vs ${nextMatch.teamB.name}`}`
     : (tourney.champion ? '🏆 Tournament Complete' : 'No pending matches');
+  saveTournamentState();
+  if (bracketModal && !bracketModal.classList.contains('hidden')) renderBracketModal();
 }
+
+function renderBracketModal() {
+  if (!tourney || !bracketModal) return;
+  get('modal-sub').textContent = `${tourney.format} · ${tourney.teams.length} teams`;
+  get('modal-champ').innerHTML = championSlot.innerHTML;
+  get('modal-standings').innerHTML = standingsSlot.innerHTML;
+  const cols = get('modal-cols');
+  cols.innerHTML = '';
+  for (const round of tourney.rounds) {
+    const col = document.createElement('div');
+    col.className = 'bracket-col';
+    const h = document.createElement('h3');
+    h.textContent = round.name;
+    col.append(h);
+    for (const m of round.matches) {
+      const card = document.createElement('div');
+      card.className = `match-card ${m.status}${m.isFinal ? ' final' : ''}`;
+      const nameA = m.teamA ? m.teamA.name : 'TBD';
+      const nameB = m.status === 'bye' ? 'BYE' : (m.teamB ? m.teamB.name : 'TBD');
+      const scoreText = m.status === 'done' ? `${m.score[0]}–${m.score[1]}` : m.status === 'bye' ? 'ADV' : (m.isFinal ? 'Bo3' : 'Bo1');
+      card.innerHTML =
+        `<div class="match-top"><span><span class="${m.winner === m.teamA && m.teamA ? 'win-name' : ''}">${escHtml(nameA)}</span>` +
+        ` <span style="color:#64748b">vs</span> <span class="${m.winner === m.teamB && m.teamB ? 'win-name' : ''}">${escHtml(nameB)}</span></span>` +
+        `<span style="color:${m.status === 'done' ? '#4ade80' : '#94a3b8'}">${escHtml(scoreText)}</span></div>` +
+        `<div class="match-meta"><span>${escHtml(m.status === 'done' ? `seed ${m.seed} · ${m.winner ? m.winner.name + ' won' : 'draw'}` : m.status === 'bye' ? 'Automatic bye' : m.status === 'running' ? 'Playing live…' : m.status === 'waiting' ? 'Waiting on prior round' : 'Ready to play')}</span></div>`;
+      col.append(card);
+    }
+    cols.append(col);
+  }
+  const next = getNextPendingMatch(tourney);
+  const btnModalNext = get('btn-modal-next');
+  btnModalNext.disabled = busy || !next;
+  btnModalNext.textContent = next
+    ? `▶ ${next.isFinal ? 'Play Grand Final (Bo3)' : `Next: ${next.teamA.name} vs ${next.teamB.name}`}`
+    : '🏆 Complete';
+}
+
+btnShowBracket?.addEventListener('click', () => {
+  if (!tourney) return;
+  renderBracketModal();
+  bracketModal.classList.remove('hidden');
+});
+get('btn-close-bracket')?.addEventListener('click', () => bracketModal?.classList.add('hidden'));
+get('btn-modal-next')?.addEventListener('click', () => {
+  bracketModal?.classList.add('hidden');
+  const next = tourney && getNextPendingMatch(tourney);
+  if (next) runTournamentMatch(next, false);
+});
+
+btnExportTourney?.addEventListener('click', () => {
+  if (!tourney) return;
+  const snap = serializeTournament(tourney);
+  // Strip raw code from exported JSON summary so it's a clean results/standings record
+  const clean = {
+    exportedAt: new Date().toISOString(),
+    format: snap.format,
+    champion: tourney.champion?.name ?? null,
+    standings: getStandings(tourney).map((t, i) => ({ rank: i + 1, name: t.name, wins: t.wins, losses: t.losses, draws: t.draws, damageDealt: t.damageDealt })),
+    rounds: snap.rounds,
+  };
+  const blob = new Blob([JSON.stringify(clean, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `victorious-tournament-${Date.now()}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+});
+
+get('btn-restore-tourney')?.addEventListener('click', () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const snap = JSON.parse(raw);
+    tourney = deserializeTournament(snap);
+    roster.splice(0, roster.length, ...tourney.teams);
+    nextBotId = Math.max(1, ...roster.map((b) => b.id + 1));
+    restoreBar.classList.add('hidden');
+    btnResetTourney.classList.remove('hidden');
+    renderRoster();
+    renderTournamentBoard();
+    status.textContent = `Restored saved ${tourney.format} tournament (${tourney.teams.length} teams).`;
+  } catch (err) {
+    status.textContent = 'Could not restore saved tournament: ' + err.message;
+  }
+});
+get('btn-discard-tourney')?.addEventListener('click', clearSavedTournament);
 
 async function runTournamentMatch(match, forceInstant = false) {
   if (busy || !tourney || match.status !== 'pending') return;
@@ -1182,6 +1361,7 @@ btnStartTourney.addEventListener('click', () => {
 btnResetTourney.addEventListener('click', () => {
   if (busy) return;
   tourney = null;
+  clearSavedTournament();
   btnResetTourney.classList.add('hidden');
   renderRoster();
   renderTournamentBoard();
@@ -1212,3 +1392,4 @@ window.addEventListener('beforeunload', (e) => {
 });
 
 renderRoster();
+checkSavedTournament();

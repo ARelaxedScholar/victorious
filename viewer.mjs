@@ -203,7 +203,15 @@ function getPokemonSprite(kind, variant = 'front') {
     img = new Image();
     img.crossOrigin = 'anonymous';
     const sub = variant === 'back' ? 'back/' : variant === 'shiny' ? 'shiny/' : '';
-    img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${sub}${entry.id}.png`;
+    const remoteUrl = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${sub}${entry.id}.png`;
+    img.onerror = () => {
+      if (!img.dataset.fallback) {
+        img.dataset.fallback = '1';
+        img.src = remoteUrl;
+      }
+    };
+    // Prefer local offline cached sprite first, fall back to PokeAPI remote URL
+    img.src = `/sprites/${variant}-${entry.id}.png`;
     spriteCache.set(cacheKey, img);
   }
   if (img && img.complete && img.naturalWidth > 0) return img;
@@ -1012,6 +1020,8 @@ const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<'
           spawnBurst3D(f.pos[0] + 0.5, f.pos[1] + 0.5, 0.7, '#ffffff', 20, 0.19, 0.28, 3.2);
           spawnRing3D(f.pos[0] + 0.5, f.pos[1] + 0.5, 0.4, colorOf(f.id), 3.8, 5.5, 0.03);
           shakeMag = 14;
+          zoomPunch = Math.max(zoomPunch, 0.12);
+          if (!silent) hitStopUntil = Math.max(hitStopUntil, performance.now() + 140);
           pushFeed(`t${frame.tick} 🏆 ${nameOf(f.id)} eliminated!`, '#fbbf24');
         }
       });

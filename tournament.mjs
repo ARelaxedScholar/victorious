@@ -277,6 +277,96 @@ export function getNextPendingMatch(state) {
   return null;
 }
 
+export function serializeTournament(state) {
+  return {
+    format: state.format,
+    bo3Final: state.bo3Final,
+    swissMaxRounds: state.swissMaxRounds,
+    finalCreated: state.finalCreated,
+    championId: state.champion?.id ?? null,
+    teams: state.teams.map((t) => ({
+      id: t.id,
+      name: t.name,
+      avatar: t.avatar,
+      language: t.language,
+      code: t.code,
+      seedRank: t.seedRank,
+      wins: t.wins,
+      losses: t.losses,
+      draws: t.draws,
+      damageDealt: t.damageDealt,
+      opponents: [...t.opponents],
+    })),
+    rounds: state.rounds.map((r) => ({
+      name: r.name,
+      matches: r.matches.map((m) => ({
+        id: m.id,
+        roundIndex: m.roundIndex,
+        teamAId: m.teamA?.id ?? null,
+        teamBId: m.teamB?.id ?? null,
+        isFinal: m.isFinal,
+        targetWins: m.targetWins,
+        status: m.status === 'running' ? 'pending' : m.status,
+        winnerId: m.winner?.id ?? null,
+        score: m.score,
+        seed: m.seed,
+      })),
+    })),
+  };
+}
+
+export function deserializeTournament(snap) {
+  const teams = snap.teams.map((t) => ({
+    ...t,
+    opponents: new Set(t.opponents ?? []),
+  }));
+  const byId = new Map(teams.map((t) => [t.id, t]));
+  let maxId = 0;
+  const rounds = snap.rounds.map((r) => ({
+    name: r.name,
+    matches: r.matches.map((m) => {
+      if (m.id > maxId) maxId = m.id;
+      return {
+        id: m.id,
+        roundIndex: m.roundIndex,
+        teamA: byId.get(m.teamAId) ?? null,
+        teamB: byId.get(m.teamBId) ?? null,
+        isFinal: m.isFinal,
+        targetWins: m.targetWins,
+        status: m.status,
+        winner: byId.get(m.winnerId) ?? null,
+        score: m.score ?? [0, 0],
+        seed: m.seed ?? null,
+        games: [],
+      };
+    }),
+  }));
+  let nextMatchId = maxId + 1;
+  const makeMatch = (roundIndex, a, b, isFinal = false) => ({
+    id: nextMatchId++,
+    roundIndex,
+    teamA: a ?? null,
+    teamB: b ?? null,
+    isFinal,
+    targetWins: isFinal && snap.bo3Final ? 2 : 1,
+    status: 'pending',
+    winner: null,
+    score: [0, 0],
+    seed: null,
+    games: [],
+  });
+  return {
+    format: snap.format,
+    bo3Final: snap.bo3Final,
+    swissMaxRounds: snap.swissMaxRounds,
+    finalCreated: snap.finalCreated,
+    champion: byId.get(snap.championId) ?? null,
+    teams,
+    rounds,
+    _makeMatch: makeMatch,
+  };
+}
+
 export function getActiveRoundPendingMatches(state) {
   for (const round of state.rounds) {
     const pending = round.matches.filter((m) => m.status === 'pending' && m.teamA && m.teamB);
