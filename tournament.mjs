@@ -4,7 +4,7 @@
 //   2. Round Robin + Top-2 Best-of-3 Grand Final
 //   3. Swiss (3 rounds) + Top-2 Best-of-3 Grand Final
 
-const AVATARS = ['knight', 'fox', 'mage', 'mech', 'dragon', 'ninja'];
+const AVATARS = ['pikachu', 'charizard', 'greninja', 'lucario', 'gengar', 'gardevoir', 'knight', 'fox', 'mage', 'mech', 'dragon', 'ninja'];
 
 export function defaultAvatar(index) {
   return AVATARS[index % AVATARS.length];

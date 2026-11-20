@@ -31,6 +31,67 @@ const PALETTE = {
   p2Light: '#fecdd3',
 };
 
+const BIOMES = {
+  'arena-21': {
+    bgTop: '#040812',
+    bgBottom: '#0b142a',
+    slabTop: '#0b1826',
+    slabSideA: '#132436',
+    slabSideB: '#0c1826',
+    slabStroke: 'rgba(56, 189, 248, 0.55)',
+    floorA: '#112232',
+    floorB: '#15293b',
+    floorLine: 'rgba(148, 197, 214, 0.09)',
+    wallTop: '#475569',
+    wallLeft: '#26354d',
+    wallRight: '#182336',
+    wallStroke: 'rgba(148, 163, 184, 0.4)',
+    beaconA: '#38bdf8',
+    beaconB: '#fb7185',
+    moteColor: '125, 211, 252',
+  },
+  'columns-21': {
+    bgTop: '#040e0b',
+    bgBottom: '#0b1f19',
+    slabTop: '#0b1e18',
+    slabSideA: '#17332a',
+    slabSideB: '#0d211b',
+    slabStroke: 'rgba(52, 211, 153, 0.52)',
+    floorA: '#112821',
+    floorB: '#153229',
+    floorLine: 'rgba(110, 231, 183, 0.09)',
+    wallTop: '#78716c',
+    wallLeft: '#57534e',
+    wallRight: '#44403c',
+    wallStroke: 'rgba(167, 243, 208, 0.34)',
+    beaconA: '#34d399',
+    beaconB: '#fbbf24',
+    moteColor: '110, 231, 183',
+  },
+  'pillars-21': {
+    bgTop: '#0f0608',
+    bgBottom: '#210e12',
+    slabTop: '#1c0f12',
+    slabSideA: '#33191d',
+    slabSideB: '#1f0e11',
+    slabStroke: 'rgba(251, 146, 60, 0.58)',
+    floorA: '#1f1417',
+    floorB: '#28191d',
+    floorLine: 'rgba(251, 146, 60, 0.1)',
+    wallTop: '#52525b',
+    wallLeft: '#3f3f46',
+    wallRight: '#27272a',
+    wallStroke: 'rgba(251, 146, 60, 0.48)',
+    beaconA: '#fb923c',
+    beaconB: '#f43f5e',
+    moteColor: '251, 191, 36',
+  },
+};
+
+function getBiome(mapName) {
+  return BIOMES[mapName] || BIOMES['arena-21'];
+}
+
 function mergeById(listA = [], listB = []) {
   const map = new Map();
   for (const item of listA) map.set(item.id, item);
@@ -93,9 +154,114 @@ export function captureFrame(obs1, obs2) {
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
-/** Draw a crisp billboarded 2.5D character sprite standing upright at (cx, cy) with scale `r`. */
-function drawCharacter(ctx, kind, cx, cy, r, teamColor, darkColor, lightColor, facingScreenX, now, isHit, bob, recoil, tilt = 0) {
+const POKEMON_ROSTER = {
+  pikachu: {
+    id: 25,
+    color: '#facc15',
+    fallback: 'fox',
+    moves: { ranged: 'Thunderbolt', frostburst: 'Thunder', repulsor: 'Discharge', dash: 'Quick Attack' },
+  },
+  charizard: {
+    id: 6,
+    color: '#fb923c',
+    fallback: 'dragon',
+    moves: { ranged: 'Flamethrower', frostburst: 'Fire Blast', repulsor: 'Heat Wave', dash: 'Flame Charge' },
+  },
+  greninja: {
+    id: 658,
+    color: '#38bdf8',
+    fallback: 'ninja',
+    moves: { ranged: 'Water Shuriken', frostburst: 'Blizzard', repulsor: 'Surf', dash: 'Shadow Sneak' },
+  },
+  lucario: {
+    id: 448,
+    color: '#60a5fa',
+    fallback: 'knight',
+    moves: { ranged: 'Aura Sphere', frostburst: 'Ice Punch', repulsor: 'Force Palm', dash: 'Extreme Speed' },
+  },
+  gengar: {
+    id: 94,
+    color: '#c084fc',
+    fallback: 'mage',
+    moves: { ranged: 'Shadow Ball', frostburst: 'Icy Wind', repulsor: 'Dark Pulse', dash: 'Phantom Force' },
+  },
+  gardevoir: {
+    id: 282,
+    color: '#f472b6',
+    fallback: 'mage',
+    moves: { ranged: 'Moonblast', frostburst: 'Psyshock', repulsor: 'Psychic', dash: 'Teleport' },
+  },
+};
+
+const spriteCache = new Map();
+function getPokemonSprite(kind, variant = 'front') {
+  const entry = POKEMON_ROSTER[kind];
+  if (!entry) return null;
+  const cacheKey = `${kind}:${variant}`;
+  let img = spriteCache.get(cacheKey);
+  if (!img && typeof Image !== 'undefined') {
+    img = new Image();
+    img.crossOrigin = 'anonymous';
+    const sub = variant === 'back' ? 'back/' : variant === 'shiny' ? 'shiny/' : '';
+    img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${sub}${entry.id}.png`;
+    spriteCache.set(cacheKey, img);
+  }
+  if (img && img.complete && img.naturalWidth > 0) return img;
+  if (variant !== 'front') return getPokemonSprite(kind, 'front');
+  return null;
+}
+for (const key of Object.keys(POKEMON_ROSTER)) {
+  getPokemonSprite(key, 'front');
+  getPokemonSprite(key, 'back');
+  getPokemonSprite(key, 'shiny');
+}
+
+/** Draw a crisp billboarded 2.5D character (or action-reactive HD-2D Pokémon sprite) standing upright at (cx, cy). */
+function drawCharacter(ctx, kind, cx, cy, r, teamColor, darkColor, lightColor, facingScreenX, now, isHit, bob, recoil, tilt = 0, pose = {}) {
   const flipX = facingScreenX < -0.15 ? -1 : 1;
+  const poke = POKEMON_ROSTER[kind];
+  const variant = pose.attacking || pose.powered ? 'shiny' : pose.facingAway ? 'back' : 'front';
+  const sprite = poke ? getPokemonSprite(kind, variant) : null;
+  if (sprite) {
+    ctx.save();
+    ctx.translate(cx, cy + bob);
+    if (tilt) ctx.rotate(tilt);
+    const dashStretch = pose.dashing ? 0.24 : 0;
+    const atkCharge = pose.attacking ? 0.14 : 0;
+    const sx = 1 + recoil * 0.18 + dashStretch + atkCharge;
+    const sy = 1 - recoil * 0.12 - dashStretch * 0.45 + atkCharge * 0.5;
+    // Front sprites face slightly left; back sprites face slightly right
+    const dirSign = variant === 'back' ? flipX : -flipX;
+    ctx.scale(dirSign * sx, sy);
+    const size = r * 3.2;
+    ctx.imageSmoothingEnabled = false;
+
+    // Elemental charge flare behind the Pokémon when firing a move or dashing
+    if (pose.attacking || pose.dashing) {
+      ctx.save();
+      ctx.globalAlpha = pose.attacking ? 0.45 : 0.3;
+      const g = ctx.createRadialGradient(0, -size * 0.08, 2, 0, -size * 0.08, size * 0.52);
+      g.addColorStop(0, '#ffffff');
+      g.addColorStop(0.4, poke.color || teamColor);
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, -size * 0.08, size * 0.52, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.shadowColor = isHit ? '#ffffff' : (pose.altTint ? teamColor : (poke.color || teamColor));
+    ctx.shadowBlur = isHit ? 18 : (pose.attacking ? 16 : 9);
+    const filters = [];
+    if (pose.altTint) filters.push('hue-rotate(155deg) saturate(1.25)');
+    if (isHit) filters.push('brightness(2.8)');
+    if (filters.length) ctx.filter = filters.join(' ');
+    ctx.drawImage(sprite, -size / 2, -size * 0.56, size, size);
+    ctx.restore();
+    return;
+  }
+  if (poke) kind = poke.fallback;
   ctx.save();
   ctx.translate(cx, cy + bob);
   if (tilt) ctx.rotate(tilt);
@@ -465,6 +631,8 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
   let tickDurationMs = 50;
   let banner = '';
   let bannerSince = 0;
+  let vsUntil = 0;
+  let vsStart = 0;
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   let lastEventTick = -1;
 
@@ -634,7 +802,9 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
     if (!frame || frame.tick === lastEventTick) return;
     lastEventTick = frame.tick;
     const fMap = new Map(frame.fighters.map((f) => [f.id, f]));
-    const colorOf = (id) => (id === 1 ? PALETTE.p1 : PALETTE.p2);
+    const pokeOf = (id) => POKEMON_ROSTER[meta.avatars?.[id - 1]];
+    const colorOf = (id) => pokeOf(id)?.color || (id === 1 ? PALETTE.p1 : PALETTE.p2);
+    const moveNameOf = (id, attack) => pokeOf(id)?.moves?.[attack] || attack;
     const nameOf = (id) => meta.names[id - 1] || `Seat ${id}`;
 
     for (const ev of frame.events ?? []) {
@@ -664,6 +834,9 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
                 color: colorOf(ev.fighter),
                 life: 1,
               });
+            } else if (ev.attack === 'frostburst' && pokeOf(ev.fighter)) {
+              const mv = moveNameOf(ev.fighter, 'frostburst');
+              spawnPopup3D(f.pos[0] + 0.5, f.pos[1] + 0.5, 2.0, `${mv}!`, colorOf(ev.fighter), 0.95);
             }
           }
           break;
@@ -712,7 +885,8 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
             if (ev.attack === 'frostburst') {
               zoomPunch = Math.max(zoomPunch, 0.06);
               if (!silent) hitStopUntil = Math.max(hitStopUntil, performance.now() + 55);
-              pushFeed(`t${frame.tick} ❄ ${nameOf(ev.attacker)} froze ${nameOf(ev.target)} (-${ev.damage})`, PALETTE.frost);
+              const mv = moveNameOf(ev.attacker, 'frostburst');
+              pushFeed(`t${frame.tick} ❄ ${nameOf(ev.attacker)} used ${mv}! (-${ev.damage})`, colorOf(ev.attacker));
             }
           }
           break;
@@ -723,30 +897,79 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
             hitFlash[ev.target] = 1;
             spawnBurst3D(t.pos[0] + 0.5, t.pos[1] + 0.5, 0.8, '#facc15', 28, 0.21, 0.25, 3.9);
             spawnRing3D(t.pos[0] + 0.5, t.pos[1] + 0.5, 0.5, '#facc15', 2.3, 4.5, 0.042);
-            spawnPopup3D(t.pos[0] + 0.5, t.pos[1] + 0.5, 2.1, `SLAM -${ev.damage}!`, '#fde047', 1.3);
+            const label = pokeOf(ev.attacker) ? `SUPER EFFECTIVE -${ev.damage}!` : `SLAM -${ev.damage}!`;
+            spawnPopup3D(t.pos[0] + 0.5, t.pos[1] + 0.5, 2.1, label, '#fde047', 1.25);
             shakeMag = Math.max(shakeMag, 10);
             zoomPunch = Math.max(zoomPunch, 0.09);
             if (!silent) hitStopUntil = Math.max(hitStopUntil, performance.now() + 75);
-            pushFeed(`t${frame.tick} 💥 WALL SLAM! ${nameOf(ev.attacker)} → ${nameOf(ev.target)} (-${ev.damage})`, '#facc15');
+            const mv = moveNameOf(ev.attacker, 'repulsor');
+            pushFeed(`t${frame.tick} 💥 ${nameOf(ev.attacker)}'s ${mv} wall-slammed ${nameOf(ev.target)} (-${ev.damage})`, '#facc15');
           }
           break;
         }
         case 'repulse': {
           if (ev.pos) {
-            spawnRing3D(ev.pos[0] + 0.5, ev.pos[1] + 0.5, 0.55, colorOf(ev.owner), 2.2, 4.5, 0.055);
-            spawnBurst3D(ev.pos[0] + 0.5, ev.pos[1] + 0.5, 0.55, colorOf(ev.owner), 14, 0.18, 0.11, 2.8);
+            const ownerKind = meta.avatars?.[ev.owner - 1];
+            const col = colorOf(ev.owner);
+            const cx = ev.pos[0] + 0.5, cy = ev.pos[1] + 0.5;
+            // Multi-ring anime signature burst for every Pokémon!
+            spawnRing3D(cx, cy, 0.55, col, 2.35, 5, 0.05);
+            spawnRing3D(cx, cy, 0.25, '#ffffff', 1.75, 3, 0.065);
+            if (ownerKind === 'lucario' || ownerKind === 'gardevoir') {
+              spawnRing3D(cx, cy, 0.9, col, 2.6, 3.5, 0.042);
+            } else if (ownerKind === 'gengar') {
+              spawnRing3D(cx, cy, 0.4, '#1e1033', 2.45, 7, 0.045);
+              spawnRing3D(cx, cy, 0.45, '#c084fc', 2.45, 3, 0.045);
+            } else if (ownerKind === 'greninja') {
+              spawnRing3D(cx, cy, 0.18, '#e0f2fe', 2.5, 4.5, 0.045);
+            } else if (ownerKind === 'pikachu') {
+              spikes.push({ x: cx, y: cy, h: 2.2, life: 1, color: '#fde047', style: 'discharge' });
+            }
+            spawnBurst3D(cx, cy, 0.55, col, 22, 0.2, 0.16, 3.2);
+            shakeMag = Math.max(shakeMag, 4.5);
+            if (pokeOf(ev.owner)) {
+              spawnPopup3D(cx, cy, 1.95, `${moveNameOf(ev.owner, 'repulsor')}!`, col, 1.0);
+            }
           }
           break;
         }
         case 'area_explode': {
           if (ev.pos) {
-            spawnRing3D(ev.pos[0] + 0.5, ev.pos[1] + 0.5, 0.2, PALETTE.frostBright, 2.4, 4.5, 0.048);
-            spawnBurst3D(ev.pos[0] + 0.5, ev.pos[1] + 0.5, 0.25, PALETTE.frost, 24, 0.17, 0.26, 3.6);
-            // Spawn 3D erupting ice crystal spikes across the 3x3 area!
-            for (const [tx, ty] of ev.tiles ?? [ev.pos]) {
-              spikes.push({ x: tx + 0.5, y: ty + 0.5, h: 0.9 + Math.random() * 0.75, life: 1 });
+            const ownerKind = meta.avatars?.[ev.owner - 1];
+            const col = pokeOf(ev.owner)?.color || PALETTE.frost;
+            const cx = ev.pos[0] + 0.5, cy = ev.pos[1] + 0.5;
+            spawnRing3D(cx, cy, 0.2, col, 2.6, 5, 0.045);
+            spawnRing3D(cx, cy, 0.45, '#ffffff', 1.9, 3, 0.06);
+            spawnBurst3D(cx, cy, 0.25, col, 30, 0.2, 0.3, 3.8);
+
+            // Signature anime sky-strike / vortex / star spectacle per Pokémon!
+            if (ownerKind === 'pikachu') {
+              spikes.push({ x: cx, y: cy, h: 7.8, life: 1, color: '#fde047', style: 'lightning' });
+              spikes.push({ x: cx - 0.6, y: cy + 0.4, h: 6.5, life: 0.9, color: '#fef08a', style: 'lightning' });
+              spikes.push({ x: cx + 0.6, y: cy - 0.3, h: 6.5, life: 0.9, color: '#bae6fd', style: 'lightning' });
+            } else if (ownerKind === 'charizard') {
+              spikes.push({ x: cx, y: cy, h: 2.6, life: 1, color: '#f97316', style: 'fireblast' });
+            } else if (ownerKind === 'greninja') {
+              spikes.push({ x: cx, y: cy, h: 4.8, life: 1, color: '#7dd3fc', style: 'blizzard' });
+            } else if (ownerKind === 'lucario') {
+              spikes.push({ x: cx, y: cy, h: 6.5, life: 1, color: '#60a5fa', style: 'aurameteor' });
+            } else if (ownerKind === 'gengar') {
+              spikes.push({ x: cx, y: cy, h: 4.6, life: 1, color: '#a855f7', style: 'voidvortex' });
+            } else if (ownerKind === 'gardevoir') {
+              spikes.push({ x: cx, y: cy, h: 7.5, life: 1, color: '#f472b6', style: 'moonbeam' });
             }
-            shakeMag = Math.max(shakeMag, 4.5);
+
+            for (const [tx, ty] of ev.tiles ?? [ev.pos]) {
+              spikes.push({
+                x: tx + 0.5,
+                y: ty + 0.5,
+                h: (ownerKind === 'charizard' ? 1.65 : 1.1) + Math.random() * 0.9,
+                life: 1,
+                color: ownerKind ? col : PALETTE.frostBright,
+                style: 'spire',
+              });
+            }
+            shakeMag = Math.max(shakeMag, 6.5);
           }
           break;
         }
@@ -816,10 +1039,14 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
 
   function updateHud(frame) {
     const [f1, f2] = frame.fighters;
+    const p1Pct = `${clamp((f1.hp / f1.max_hp) * 100, 0, 100)}%`;
+    const p2Pct = `${clamp((f2.hp / f2.max_hp) * 100, 0, 100)}%`;
     if (hudEls.p1HpText) hudEls.p1HpText.textContent = `${Math.max(0, f1.hp)} / ${f1.max_hp}`;
     if (hudEls.p2HpText) hudEls.p2HpText.textContent = `${Math.max(0, f2.hp)} / ${f2.max_hp}`;
-    if (hudEls.p1HpBar) hudEls.p1HpBar.style.width = `${clamp((f1.hp / f1.max_hp) * 100, 0, 100)}%`;
-    if (hudEls.p2HpBar) hudEls.p2HpBar.style.width = `${clamp((f2.hp / f2.max_hp) * 100, 0, 100)}%`;
+    if (hudEls.p1HpBar) hudEls.p1HpBar.style.width = p1Pct;
+    if (hudEls.p2HpBar) hudEls.p2HpBar.style.width = p2Pct;
+    if (hudEls.p1HpTrail) hudEls.p1HpTrail.style.width = p1Pct;
+    if (hudEls.p2HpTrail) hudEls.p2HpTrail.style.width = p2Pct;
     renderPills(hudEls.p1Status, f1);
     renderPills(hudEls.p2Status, f2);
     if (hudEls.tickInfo) {
@@ -833,6 +1060,14 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
 
   function drawScene(now) {
     requestAnimationFrame(drawScene);
+
+    // Guarantee clean canvas state every frame (immune to any partial-frame leak)
+    ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = 'transparent';
+    ctx.filter = 'none';
+    ctx.setLineDash([]);
 
     // Smooth camera interpolation + optional Auto-Cam tracking
     if (autoCam && currFrame) {
@@ -855,10 +1090,11 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
     zoomPunch *= 0.86;
     if (zoomPunch < 0.002) zoomPunch = 0;
 
-    // Deep atmospheric backdrop + ambient floating motes
+    // Deep atmospheric backdrop + ambient floating motes (biome-themed!)
+    const biome = getBiome(meta.mapName);
     const bg = ctx.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, PALETTE.bgTop);
-    bg.addColorStop(1, PALETTE.bgBottom);
+    bg.addColorStop(0, biome.bgTop);
+    bg.addColorStop(1, biome.bgBottom);
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, W, H);
 
@@ -866,7 +1102,7 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
     for (const m of motes) {
       m.y += m.vy;
       if (m.y < -4) { m.y = H + 4; m.x = Math.random() * W; }
-      ctx.fillStyle = `rgba(125, 211, 252, ${m.a})`;
+      ctx.fillStyle = `rgba(${biome.moteColor}, ${m.a})`;
       ctx.beginPath();
       ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2);
       ctx.fill();
@@ -889,30 +1125,42 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
       shakeMag = 0;
     }
 
-    // 1. Floating 3D Coliseum Platform Slab with Beveled Tabletop Rim & Corner Beacons
+    // 1. Floating 3D Pokémon Stadium Coliseum Platform Slab with Corner Floodlights
     if (proj.is3D) {
-      draw3DBox(proj, -0.45, -0.45, cols + 0.45, rows + 0.45, -1.1, 0, {
-        top: PALETTE.slabTop,
-        sideA: PALETTE.slabSideA,
-        sideB: PALETTE.slabSideB,
-        stroke: 'rgba(56, 189, 248, 0.6)',
+      draw3DBox(proj, -0.5, -0.5, cols + 0.5, rows + 0.5, -1.15, 0, {
+        top: biome.slabTop,
+        sideA: biome.slabSideA,
+        sideB: biome.slabSideB,
+        stroke: biome.slabStroke,
       });
-      // Tabletop corner beacon pylons
-      const corners = [[-0.25, -0.25], [cols + 0.25, -0.25], [cols + 0.25, rows + 0.25], [-0.25, rows + 0.25]];
+      // Corner stadium floodlight pylons + sweeping light beams
+      const corners = [[-0.28, -0.28], [cols + 0.28, -0.28], [cols + 0.28, rows + 0.28], [-0.28, rows + 0.28]];
       corners.forEach(([bx, by], ci) => {
-        const bp = proj.project(bx, by, 0.18);
+        const bp = proj.project(bx, by, 0.22);
+        const mid = proj.project(cols / 2, rows / 2, 0.05);
+        const bc = ci % 2 === 0 ? biome.beaconA : biome.beaconB;
         ctx.save();
-        ctx.fillStyle = ci % 2 === 0 ? PALETTE.p1 : PALETTE.p2;
-        ctx.shadowColor = ctx.fillStyle;
-        ctx.shadowBlur = 10;
+        const beam = ctx.createLinearGradient(bp.x, bp.y, mid.x, mid.y);
+        beam.addColorStop(0, `${bc}29`);
+        beam.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.strokeStyle = beam;
+        ctx.lineWidth = 22;
         ctx.beginPath();
-        ctx.arc(bp.x, bp.y, 3.2, 0, Math.PI * 2);
+        ctx.moveTo(bp.x, bp.y);
+        ctx.lineTo(lerp(bp.x, mid.x, 0.55), lerp(bp.y, mid.y, 0.55));
+        ctx.stroke();
+
+        ctx.fillStyle = bc;
+        ctx.shadowColor = bc;
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(bp.x, bp.y, 3.6, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       });
     }
 
-    // 2. Arena Floor Grid + Danger Zone Tint
+    // 2. Stadium Battle Court Turf + Danger Zone Tint
     const zone = currFrame.zone;
     const [zcx, zcy] = zone ? zone.center : [10, 10];
     const zRad = zone ? zone.radius : 99;
@@ -922,27 +1170,62 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
         drawTileQuad(proj, x, y, 0);
         const outside = Math.max(Math.abs(x - zcx), Math.abs(y - zcy)) > zRad;
         ctx.fillStyle = outside
-          ? '#241122'
-          : (x + y) % 2 === 0 ? PALETTE.floorA : PALETTE.floorB;
+          ? '#261120'
+          : (x + y) % 2 === 0 ? biome.floorA : biome.floorB;
         ctx.fill();
-        ctx.strokeStyle = outside ? 'rgba(248, 113, 113, 0.16)' : PALETTE.floorLine;
+        ctx.strokeStyle = outside ? 'rgba(248, 113, 113, 0.16)' : biome.floorLine;
         ctx.lineWidth = 0.75;
         ctx.stroke();
       }
     }
 
-    // Center holographic battle ring
+    // Pokémon Stadium Court Sidelines & Center Pokéball Emblem!
     {
-      const c = proj.project(cols / 2, rows / 2, 0.01);
+      const c = proj.project(cols / 2, rows / 2, 0.015);
+      const rOuter = c.s * 3.1;
+      const rInner = c.s * 0.92;
       ctx.save();
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.22)';
+      // Court outer boundary line
+      poly([
+        proj.project(0.5, 0.5, 0.012),
+        proj.project(cols - 0.5, 0.5, 0.012),
+        proj.project(cols - 0.5, rows - 0.5, 0.012),
+        proj.project(0.5, rows - 0.5, 0.012),
+      ]);
+      ctx.strokeStyle = 'rgba(226, 232, 240, 0.2)';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+
+      // Center dividing line
+      const mL = proj.project(0.5, rows / 2, 0.013);
+      const mR = proj.project(cols - 0.5, rows / 2, 0.013);
+      ctx.strokeStyle = 'rgba(226, 232, 240, 0.18)';
       ctx.lineWidth = 1.6;
       ctx.beginPath();
-      ctx.ellipse(c.x, c.y, c.s * 2.25, c.s * 2.25 * proj.tiltY, 0, 0, Math.PI * 2);
+      ctx.moveTo(mL.x, mL.y);
+      ctx.lineTo(mR.x, mR.y);
       ctx.stroke();
-      ctx.strokeStyle = 'rgba(251, 113, 133, 0.16)';
+
+      // Pokéball center emblem (soft crimson top half + crisp white bottom half)
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.18)';
       ctx.beginPath();
-      ctx.ellipse(c.x, c.y, c.s * 0.8, c.s * 0.8 * proj.tiltY, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x, c.y, rOuter, rOuter * proj.tiltY, 0, Math.PI, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(248, 250, 252, 0.1)';
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, rOuter, rOuter * proj.tiltY, 0, 0, Math.PI);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(226, 232, 240, 0.34)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, rOuter, rOuter * proj.tiltY, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#112232';
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, rInner, rInner * proj.tiltY, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(226, 232, 240, 0.45)';
+      ctx.lineWidth = 2;
       ctx.stroke();
       ctx.restore();
     }
@@ -1113,37 +1396,143 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
           depth: c.depth,
           draw: () => {
             draw3DBox(proj, x + 0.06, y + 0.06, x + 0.94, y + 0.94, 0, 1.38, {
-              top: PALETTE.wallTop,
-              sideA: PALETTE.wallLeft,
-              sideB: PALETTE.wallRight,
-              stroke: 'rgba(148, 163, 184, 0.4)',
+              top: biome.wallTop,
+              sideA: biome.wallLeft,
+              sideB: biome.wallRight,
+              stroke: biome.wallStroke,
             });
           },
         });
       }
     }
 
-    // 6b. 3D Erupting Frostburst Ice Spikes
+    // 6b. 3D Signature Elemental Spectacles (Thunder / Fire Blast / Blizzard / Aura Meteor / Void Vortex / Moonbeam)
     for (let i = spikes.length - 1; i >= 0; i--) {
       const sp = spikes[i];
+      const life = clamp(sp.life, 0.01, 1);
       const base = proj.project(sp.x, sp.y, 0.02);
-      const tip = proj.project(sp.x, sp.y, sp.h * Math.sin(sp.life * Math.PI));
+      const tip = proj.project(sp.x, sp.y, sp.h * (sp.style === 'spire' ? Math.sin(life * Math.PI) : 1));
       const left = proj.project(sp.x - 0.24, sp.y, 0.02);
       const right = proj.project(sp.x + 0.24, sp.y, 0.02);
       drawables.push({
-        depth: base.depth + 0.08,
+        depth: base.depth + 0.12,
         draw: () => {
           ctx.save();
-          ctx.globalAlpha = sp.life * 0.9;
-          poly([left, tip, right]);
-          ctx.fillStyle = PALETTE.frostBright;
-          ctx.shadowColor = PALETTE.frost;
-          ctx.shadowBlur = 12;
-          ctx.fill();
+          ctx.globalAlpha = life * 0.94;
+          if (sp.style === 'lightning') {
+            ctx.strokeStyle = sp.color || '#fef08a';
+            ctx.shadowColor = '#facc15';
+            ctx.shadowBlur = 24;
+            ctx.lineWidth = Math.max(0.5, 4.6 * life);
+            ctx.beginPath();
+            ctx.moveTo(tip.x, tip.y);
+            for (let s = 1; s <= 6; s++) {
+              const t = s / 6;
+              const jx = s < 6 ? (Math.random() - 0.5) * 26 : 0;
+              ctx.lineTo(lerp(tip.x, base.x, t) + jx, lerp(tip.y, base.y, t));
+            }
+            ctx.stroke();
+          } else if (sp.style === 'discharge') {
+            // Radial crackling electric arcs around Pikachu
+            ctx.strokeStyle = '#fef08a';
+            ctx.shadowColor = '#facc15';
+            ctx.shadowBlur = 16;
+            ctx.lineWidth = Math.max(0.5, 2.4 * life);
+            for (let b = 0; b < 6; b++) {
+              const a = (b * Math.PI) / 3 + now / 120;
+              const end = proj.project(sp.x + Math.cos(a) * 1.9, sp.y + Math.sin(a) * 1.9, 0.45);
+              const mid = proj.project(sp.x + Math.cos(a + 0.22) * 0.95, sp.y + Math.sin(a + 0.22) * 0.95, 0.75);
+              ctx.beginPath();
+              ctx.moveTo(base.x, base.y - 10);
+              ctx.lineTo(mid.x, mid.y);
+              ctx.lineTo(end.x, end.y);
+              ctx.stroke();
+            }
+          } else if (sp.style === 'fireblast') {
+            // Iconic 5-pointed blazing Fire Blast star on the 3x3 arena floor!
+            const rad = 1.65 * (1.2 - life * 0.25);
+            const pts = [];
+            for (let k = 0; k < 10; k++) {
+              const a = (k * Math.PI) / 5 - Math.PI / 2;
+              const r = k % 2 === 0 ? rad : rad * 0.42;
+              pts.push(proj.project(sp.x + Math.cos(a) * r, sp.y + Math.sin(a) * r, 0.14));
+            }
+            poly(pts);
+            ctx.fillStyle = 'rgba(249, 115, 22, 0.65)';
+            ctx.shadowColor = '#f97316';
+            ctx.shadowBlur = 22;
+            ctx.fill();
+            ctx.strokeStyle = '#fef08a';
+            ctx.lineWidth = 2.6;
+            ctx.stroke();
+          } else if (sp.style === 'blizzard' || sp.style === 'voidvortex') {
+            // Swirling 3D elemental cyclone rising up from the 3x3 impact zone!
+            const isVoid = sp.style === 'voidvortex';
+            ctx.strokeStyle = isVoid ? '#c084fc' : '#e0f2fe';
+            ctx.shadowColor = isVoid ? '#9333ea' : '#38bdf8';
+            ctx.shadowBlur = 18;
+            for (let ring = 0; ring < 5; ring++) {
+              const z = 0.25 + ring * 0.78 + (1 - life) * 1.1;
+              const r = Math.max(0.05, (0.55 + ring * 0.28) * life);
+              const rp = proj.project(sp.x, sp.y, z);
+              const rx = Math.max(1, r * rp.s);
+              const ry = Math.max(1, r * rp.s * proj.tiltY);
+              ctx.lineWidth = Math.max(0.5, (3.4 - ring * 0.4) * life);
+              ctx.setLineDash([12, 8]);
+              ctx.lineDashOffset = (ring % 2 === 0 ? 1 : -1) * (now / 14);
+              ctx.beginPath();
+              ctx.ellipse(rp.x, rp.y, rx, ry, 0, 0, Math.PI * 2);
+              ctx.stroke();
+            }
+          } else if (sp.style === 'aurameteor') {
+            // Descending sapphire Aura beam + shockwave pillar!
+            const grad = ctx.createLinearGradient(tip.x, tip.y, base.x, base.y);
+            grad.addColorStop(0, 'rgba(96,165,250,0)');
+            grad.addColorStop(0.6, '#60a5fa');
+            grad.addColorStop(1, '#ffffff');
+            ctx.strokeStyle = grad;
+            ctx.shadowColor = '#3b82f6';
+            ctx.shadowBlur = 24;
+            ctx.lineWidth = Math.max(1, 18 * life);
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(tip.x, tip.y);
+            ctx.lineTo(base.x, base.y);
+            ctx.stroke();
+          } else if (sp.style === 'moonbeam') {
+            // Radiant rose-pink Moonbeam / Psyshock pillar + glowing rings!
+            const grad = ctx.createLinearGradient(tip.x, tip.y, base.x, base.y);
+            grad.addColorStop(0, 'rgba(244,114,182,0)');
+            grad.addColorStop(0.5, 'rgba(244,114,182,0.75)');
+            grad.addColorStop(1, '#ffffff');
+            ctx.strokeStyle = grad;
+            ctx.shadowColor = '#ec4899';
+            ctx.shadowBlur = 24;
+            ctx.lineWidth = Math.max(1, 22 * life);
+            ctx.beginPath();
+            ctx.moveTo(tip.x, tip.y);
+            ctx.lineTo(base.x, base.y);
+            ctx.stroke();
+            for (let ring = 0; ring < 3; ring++) {
+              const rp = proj.project(sp.x, sp.y, 0.5 + ring * 1.1);
+              const rr = Math.max(1, (1.3 - ring * 0.25) * rp.s);
+              ctx.strokeStyle = '#fde68a';
+              ctx.lineWidth = Math.max(0.5, 2.2 * life);
+              ctx.beginPath();
+              ctx.ellipse(rp.x, rp.y, rr, Math.max(1, rr * proj.tiltY), 0, 0, Math.PI * 2);
+              ctx.stroke();
+            }
+          } else {
+            poly([left, tip, right]);
+            ctx.fillStyle = sp.color || PALETTE.frostBright;
+            ctx.shadowColor = sp.color || PALETTE.frost;
+            ctx.shadowBlur = 14;
+            ctx.fill();
+          }
           ctx.restore();
         },
       });
-      sp.life -= 0.05;
+      sp.life -= 0.045;
       if (sp.life <= 0) spikes.splice(i, 1);
     }
 
@@ -1342,11 +1731,19 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
             ctx.restore();
           }
 
-          // Draw the upright 2.5D character sprite with miniature hop tilt!
+          // Draw the upright 2.5D character / action-reactive Pokémon sprite!
+          const isMirrorAlt = idx === 1 && meta.avatars?.[0] && meta.avatars[0] === meta.avatars[1];
           drawCharacter(
             ctx, avatar, bodyPt.x, bodyPt.y, r,
             color, dark, light, facingScreenX, now,
             hitFlash[f.id] > 0.2, bob, recoil[f.id], moveTilt,
+            {
+              attacking: recoil[f.id] > 0.25,
+              dashing: moveDist >= 2,
+              powered: (f.buffs?.power ?? 0) > 0,
+              facingAway: aimPt.y - bodyPt.y < -5,
+              altTint: isMirrorAlt,
+            },
           );
 
           // Floating glowing weapon orb aimed in 3D direction
@@ -1415,39 +1812,160 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
       const pAir = proj.project(ix, iy, 0.64);
       const pTail = proj.project(tx, ty, 0.64);
       const pShadow = proj.project(ix, iy, 0.02);
-      const color = pr.owner === 1 ? PALETTE.p1 : PALETTE.p2;
+      const ownerKind = meta.avatars?.[pr.owner - 1];
+      const ownerPoke = POKEMON_ROSTER[ownerKind];
+      const color = ownerPoke?.color || (pr.owner === 1 ? PALETTE.p1 : PALETTE.p2);
 
       drawables.push({
         depth: pAir.depth + 0.22,
         draw: () => {
-          // Ground shadow + glow
+          // Ground shadow
           ctx.fillStyle = 'rgba(2, 6, 23, 0.55)';
           ctx.beginPath();
-          ctx.ellipse(pShadow.x, pShadow.y, 5.5, 5.5 * proj.tiltY, 0, 0, Math.PI * 2);
+          ctx.ellipse(pShadow.x, pShadow.y, 6, 6 * proj.tiltY, 0, 0, Math.PI * 2);
           ctx.fill();
 
           ctx.save();
-          const grad = ctx.createLinearGradient(pTail.x, pTail.y, pAir.x, pAir.y);
-          grad.addColorStop(0, 'rgba(255,255,255,0)');
-          grad.addColorStop(1, color);
-          ctx.strokeStyle = grad;
-          ctx.lineWidth = 6.5;
-          ctx.lineCap = 'round';
-          ctx.beginPath();
-          ctx.moveTo(pTail.x, pTail.y);
-          ctx.lineTo(pAir.x, pAir.y);
-          ctx.stroke();
-
-          ctx.fillStyle = color;
-          ctx.shadowColor = color;
-          ctx.shadowBlur = 16;
-          ctx.beginPath();
-          ctx.arc(pAir.x, pAir.y, 5.4, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = '#ffffff';
-          ctx.beginPath();
-          ctx.arc(pAir.x, pAir.y, 2.5, 0, Math.PI * 2);
-          ctx.fill();
+          if (ownerKind === 'pikachu') {
+            // THUNDERBOLT: jagged crackling lightning bolt!
+            ctx.strokeStyle = '#fde047';
+            ctx.shadowColor = '#facc15';
+            ctx.shadowBlur = 16;
+            ctx.lineWidth = 3.2;
+            ctx.beginPath();
+            ctx.moveTo(pTail.x, pTail.y);
+            for (let s = 1; s <= 4; s++) {
+              const t = s / 4;
+              const jx = s < 4 ? (Math.random() - 0.5) * 11 : 0;
+              const jy = s < 4 ? (Math.random() - 0.5) * 11 : 0;
+              ctx.lineTo(lerp(pTail.x, pAir.x, t) + jx, lerp(pTail.y, pAir.y, t) + jy);
+            }
+            ctx.stroke();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 4.5, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (ownerKind === 'charizard') {
+            // FLAMETHROWER: roaring fireballs + ember plume!
+            const grad = ctx.createLinearGradient(pTail.x, pTail.y, pAir.x, pAir.y);
+            grad.addColorStop(0, 'rgba(239,68,68,0)');
+            grad.addColorStop(0.5, '#f97316');
+            grad.addColorStop(1, '#fde047');
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 10;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(pTail.x, pTail.y);
+            ctx.lineTo(pAir.x, pAir.y);
+            ctx.stroke();
+            ctx.fillStyle = '#fb923c';
+            ctx.shadowColor = '#f97316';
+            ctx.shadowBlur = 18;
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 7.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fef08a';
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 3.6, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (ownerKind === 'greninja') {
+            // WATER SHURIKEN: spinning 4-blade cyan star!
+            ctx.translate(pAir.x, pAir.y);
+            ctx.rotate(now / 40);
+            ctx.fillStyle = '#38bdf8';
+            ctx.shadowColor = '#7dd3fc';
+            ctx.shadowBlur = 16;
+            ctx.beginPath();
+            for (let b = 0; b < 8; b++) {
+              const a = (b * Math.PI) / 4;
+              const rad = b % 2 === 0 ? 10.5 : 3.2;
+              if (b === 0) ctx.moveTo(Math.cos(a) * rad, Math.sin(a) * rad);
+              else ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (ownerKind === 'gengar') {
+            // SHADOW BALL: dark-core violet spectral sphere with wisp rings!
+            ctx.strokeStyle = '#a855f7';
+            ctx.shadowColor = '#9333ea';
+            ctx.shadowBlur = 16;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 7.5 + Math.sin(now / 60) * 1.5, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = '#1e1033';
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 5.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#e9d5ff';
+            ctx.lineWidth = 1.4;
+            ctx.stroke();
+          } else if (ownerKind === 'lucario') {
+            // AURA SPHERE: pulsing double-ring sapphire energy orb!
+            ctx.strokeStyle = '#93c5fd';
+            ctx.shadowColor = '#3b82f6';
+            ctx.shadowBlur = 18;
+            ctx.lineWidth = 2.4;
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 8.5, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = '#60a5fa';
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 5.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 2.6, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (ownerKind === 'gardevoir') {
+            // MOONBLAST: radiant rose-pink lunar comet + starlight halo!
+            const grad = ctx.createLinearGradient(pTail.x, pTail.y, pAir.x, pAir.y);
+            grad.addColorStop(0, 'rgba(244,114,182,0)');
+            grad.addColorStop(1, '#f472b6');
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 7.5;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(pTail.x, pTail.y);
+            ctx.lineTo(pAir.x, pAir.y);
+            ctx.stroke();
+            ctx.fillStyle = '#fbcfe8';
+            ctx.shadowColor = '#ec4899';
+            ctx.shadowBlur = 18;
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 6.8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 3.2, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            // Default plasma comet
+            const grad = ctx.createLinearGradient(pTail.x, pTail.y, pAir.x, pAir.y);
+            grad.addColorStop(0, 'rgba(255,255,255,0)');
+            grad.addColorStop(1, color);
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 6.5;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(pTail.x, pTail.y);
+            ctx.lineTo(pAir.x, pAir.y);
+            ctx.stroke();
+            ctx.fillStyle = color;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 16;
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 5.4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(pAir.x, pAir.y, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
           ctx.restore();
         },
       });
@@ -1614,6 +2132,58 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
       if (pop.life <= 0) popups.splice(i, 1);
     }
 
+    // 10b. Pre-Match Fighting-Game "VS" Intro Splash
+    if (now < vsUntil) {
+      const dur = Math.max(1, vsUntil - vsStart);
+      const t = clamp((now - vsStart) / dur, 0, 1);
+      const fade = t < 0.14 ? t / 0.14 : t > 0.8 ? (1 - t) / 0.2 : 1;
+      const slide = (1 - Math.min(1, t * 5)) * 70;
+      ctx.save();
+      ctx.globalAlpha = clamp(fade, 0, 1);
+      // Split banner backdrop
+      ctx.fillStyle = 'rgba(4, 8, 18, 0.86)';
+      ctx.fillRect(0, H / 2 - 76, W, 152);
+      const gradL = ctx.createLinearGradient(0, 0, W / 2, 0);
+      gradL.addColorStop(0, 'rgba(56, 189, 248, 0.34)');
+      gradL.addColorStop(1, 'rgba(56, 189, 248, 0.04)');
+      ctx.fillStyle = gradL;
+      ctx.fillRect(0, H / 2 - 76, W / 2, 152);
+      const gradR = ctx.createLinearGradient(W / 2, 0, W, 0);
+      gradR.addColorStop(0, 'rgba(251, 113, 133, 0.04)');
+      gradR.addColorStop(1, 'rgba(251, 113, 133, 0.34)');
+      ctx.fillStyle = gradR;
+      ctx.fillRect(W / 2, H / 2 - 76, W / 2, 152);
+      ctx.fillStyle = PALETTE.p1;
+      ctx.fillRect(0, H / 2 - 76, W / 2, 3);
+      ctx.fillStyle = PALETTE.p2;
+      ctx.fillRect(W / 2, H / 2 - 76, W / 2, 3);
+      ctx.fillRect(0, H / 2 + 73, W, 2);
+
+      // Both fighters facing off!
+      const av1 = meta.avatars?.[0] || 'pikachu';
+      const av2 = meta.avatars?.[1] || 'charizard';
+      const sameAv = av1 === av2;
+      drawCharacter(ctx, av1, W * 0.26 - slide, H / 2 - 2, 32, PALETTE.p1, PALETTE.p1Dark, PALETTE.p1Light, 10, now, false, 0, 0, 0, {});
+      drawCharacter(ctx, av2, W * 0.74 + slide, H / 2 - 2, 32, PALETTE.p2, PALETTE.p2Dark, PALETTE.p2Light, -10, now, false, 0, 0, 0, { altTint: sameAv });
+
+      // Team names
+      ctx.font = '800 20px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#bae6fd';
+      ctx.fillText((meta.names[0] || 'Team A').slice(0, 18), W * 0.26 - slide, H / 2 + 54);
+      ctx.fillStyle = '#fecdd3';
+      ctx.fillText((meta.names[1] || 'Team B').slice(0, 18), W * 0.74 + slide, H / 2 + 54);
+
+      // Center glowing VS badge
+      ctx.font = '900 42px system-ui';
+      ctx.fillStyle = '#fde047';
+      ctx.shadowColor = '#f59e0b';
+      ctx.shadowBlur = 22;
+      ctx.textBaseline = 'middle';
+      ctx.fillText('VS', W / 2, H / 2);
+      ctx.restore();
+    }
+
     // 11. Victory Banner
     if (banner) {
       ctx.save();
@@ -1704,11 +2274,39 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
     camFocusY = 10.5;
   }
 
+  function setCameraPreset(preset) {
+    if (preset === '2.5d') {
+      mode3D = false;
+      targetZoom = 1.0;
+      canvas.style.cursor = 'default';
+    } else if (preset === 'dramatic') {
+      mode3D = true;
+      targetYaw = 0.52;
+      targetTilt = 0.37;
+      targetZoom = 1.15;
+      canvas.style.cursor = 'grab';
+    } else {
+      mode3D = true;
+      targetYaw = 0.66;
+      targetTilt = 0.55;
+      targetZoom = 1.0;
+      canvas.style.cursor = 'grab';
+    }
+  }
+
+  function showVsIntro(durationMs = 1050) {
+    if (reducedMotion.matches || durationMs <= 0) return;
+    vsStart = performance.now();
+    vsUntil = vsStart + durationMs;
+  }
+
   return {
     setMeta,
     setBanner,
     render,
-    setMode3D: (v) => { mode3D = Boolean(v); canvas.style.cursor = mode3D ? 'grab' : 'default'; },
+    showVsIntro,
+    setCameraPreset,
+    setMode3D: (v) => setCameraPreset(v ? '3d' : '2.5d'),
     setAutoCam: (v) => { autoCam = Boolean(v); if (!autoCam) targetZoom = 1.0; },
     setShowSight: (v) => { showSight = Boolean(v); },
     setShowDanger: (v) => { showDanger = Boolean(v); },

@@ -12,7 +12,7 @@ function pursuit(obs) {
 }
 
 export const panel = [
-  { key: 'random', label: "Random baseline", name: 'Random', avatar: 'fox', start: HOUSE_BOTS.random.start },
-  { key: 'pursuit', label: "Local pressure bot", name: 'Pursuit', avatar: 'mech', start: () => pursuit },
-  { key: 'starter', label: "Ladder rating 1109 (Nov 20, 2026)", name: 'TS Starter', avatar: 'knight', start: HOUSE_BOTS['ts-starter'].start },
+  { key: 'random', label: "Random baseline", name: 'Random', avatar: 'gengar', start: HOUSE_BOTS.random.start },
+  { key: 'pursuit', label: "Local pressure bot", name: 'Pursuit', avatar: 'charizard', start: () => pursuit },
+  { key: 'starter', label: "Ladder rating 1109 (Nov 20, 2026)", name: 'TS Starter', avatar: 'lucario', start: HOUSE_BOTS['ts-starter'].start },
 ];

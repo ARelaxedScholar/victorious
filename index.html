@@ -64,8 +64,9 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .fighter-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
 .fighter-name{font-weight:800;font-size:.96rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .p1-text{color:#38bdf8}.p2-text{color:#fb7185}
-.hp-track{height:10px;background:#1e293b;border-radius:999px;overflow:hidden;margin-bottom:7px;box-shadow:inset 0 1px 3px rgba(0,0,0,.6)}
-.hp-fill{height:100%;transition:width 80ms linear;border-radius:999px}
+.hp-track{position:relative;height:10px;background:#1e293b;border-radius:999px;overflow:hidden;margin-bottom:7px;box-shadow:inset 0 1px 3px rgba(0,0,0,.6)}
+.hp-trail{position:absolute;inset:0 auto 0 0;background:linear-gradient(90deg,#fde68a,#ffffff);border-radius:999px;transition:width 520ms ease-out 140ms}
+.hp-fill{position:relative;z-index:1;height:100%;transition:width 75ms linear;border-radius:999px}
 .p1-bar{background:linear-gradient(90deg,#0284c7,#38bdf8)}.p2-bar{background:linear-gradient(90deg,#e11d48,#fb7185)}
 .fighter-sub{display:flex;gap:5px;flex-wrap:wrap;min-height:22px}
 .pill{font-size:.69rem;font-weight:700;padding:2px 6px;border-radius:5px;letter-spacing:.02em}
@@ -196,7 +197,13 @@ iframe{display:none}
               <label>Name<input id="name-a" required maxlength="40" value="Team A"></label>
               <label>Character
                 <select id="avatar-a">
-                  <option value="knight" selected>⚔️ Cyber Knight</option>
+                  <option value="pikachu" selected>⚡ Pikachu</option>
+                  <option value="charizard">🔥 Charizard</option>
+                  <option value="greninja">💧 Greninja</option>
+                  <option value="lucario">🥊 Lucario</option>
+                  <option value="gengar">👻 Gengar</option>
+                  <option value="gardevoir">✨ Gardevoir</option>
+                  <option value="knight">⚔️ Cyber Knight</option>
                   <option value="fox">🦊 Neon Fox</option>
                   <option value="mage">🧙 Frost Mage</option>
                   <option value="mech">🤖 Void Mech</option>
@@ -217,8 +224,14 @@ iframe{display:none}
               <label>Name<input id="name-b" required maxlength="40" value="Team B"></label>
               <label>Character
                 <select id="avatar-b">
+                  <option value="pikachu">⚡ Pikachu</option>
+                  <option value="charizard" selected>🔥 Charizard</option>
+                  <option value="greninja">💧 Greninja</option>
+                  <option value="lucario">🥊 Lucario</option>
+                  <option value="gengar">👻 Gengar</option>
+                  <option value="gardevoir">✨ Gardevoir</option>
                   <option value="knight">⚔️ Cyber Knight</option>
-                  <option value="fox" selected>🦊 Neon Fox</option>
+                  <option value="fox">🦊 Neon Fox</option>
                   <option value="mage">🧙 Frost Mage</option>
                   <option value="mech">🤖 Void Mech</option>
                   <option value="dragon">🐉 Mecha Dragon</option>
@@ -282,7 +295,7 @@ iframe{display:none}
             <span id="p1-name" class="fighter-name p1-text">Seat 1</span>
             <span id="p1-hp-text" style="font-size:.85rem;font-weight:700">130 / 130</span>
           </div>
-          <div class="hp-track"><div id="p1-hp-bar" class="hp-fill p1-bar" style="width:100%"></div></div>
+          <div class="hp-track"><div id="p1-hp-trail" class="hp-trail" style="width:100%"></div><div id="p1-hp-bar" class="hp-fill p1-bar" style="width:100%"></div></div>
           <div id="p1-status" class="fighter-sub"></div>
         </div>
         <div class="fighter-card">
@@ -290,7 +303,7 @@ iframe{display:none}
             <span id="p2-name" class="fighter-name p2-text">Seat 2</span>
             <span id="p2-hp-text" style="font-size:.85rem;font-weight:700">130 / 130</span>
           </div>
-          <div class="hp-track"><div id="p2-hp-bar" class="hp-fill p2-bar" style="width:100%"></div></div>
+          <div class="hp-track"><div id="p2-hp-trail" class="hp-trail" style="width:100%"></div><div id="p2-hp-bar" class="hp-fill p2-bar" style="width:100%"></div></div>
           <div id="p2-status" class="fighter-sub"></div>
         </div>
       </div>

@@ -71,6 +71,8 @@ const viewer = createArenaViewer(get('arena'), {
   p2HpText: get('p2-hp-text'),
   p1HpBar: get('p1-hp-bar'),
   p2HpBar: get('p2-hp-bar'),
+  p1HpTrail: get('p1-hp-trail'),
+  p2HpTrail: get('p2-hp-trail'),
   p1Status: get('p1-status'),
   p2Status: get('p2-status'),
   metaInfo: get('meta-info'),
@@ -116,16 +118,22 @@ bgmVol?.addEventListener('input', () => audio.setBgmVolume(bgmVol.value));
 window.addEventListener('pointerdown', () => audio.unlock(), { once: true });
 
 // Interactive viewer toolbar
-let is3D = true;
+const CAM_PRESETS = [
+  ['3d', '3D Coliseum'],
+  ['dramatic', '🎬 Dramatic Low'],
+  ['2.5d', '2.5D Flat'],
+];
+let camPresetIdx = 0;
 let isAutoCam = false;
 let isSight = false;
 let isDanger = false;
 
 get('btn-view')?.addEventListener('click', (e) => {
-  is3D = !is3D;
-  viewer.setMode3D(is3D);
-  e.currentTarget.textContent = is3D ? '3D Coliseum' : '2.5D Flat';
-  e.currentTarget.classList.toggle('active', is3D);
+  camPresetIdx = (camPresetIdx + 1) % CAM_PRESETS.length;
+  const [key, label] = CAM_PRESETS[camPresetIdx];
+  viewer.setCameraPreset(key);
+  e.currentTarget.textContent = label;
+  e.currentTarget.classList.toggle('active', key !== '2.5d');
 });
 get('btn-autocam')?.addEventListener('click', (e) => {
   isAutoCam = !isAutoCam;
@@ -523,7 +531,14 @@ async function runGame(teams, seed, gameNumber, { forceInstant = false } = {}) {
       maxTicks: matches[0].rules?.max_ticks ?? 600,
     };
     viewer.setMeta(meta);
-    if (!forceInstant) audio.ensureBgmPlaying();
+    if (!forceInstant && getTickDelayMs() > 0) {
+      audio.ensureBgmPlaying();
+      viewer.render(captureFrame(game.next(1), game.next(2)), 0, true);
+      viewer.showVsIntro(1050);
+      await sleep(1050);
+    } else if (!forceInstant) {
+      audio.ensureBgmPlaying();
+    }
     status.textContent = `Game ${gameNumber}: ${teams[0].name} vs. ${teams[1].name} (seed ${seed})…`;
     modeInfo.textContent = forceInstant ? 'Simulating…' : 'Live';
 
@@ -786,6 +801,12 @@ const bracketSlot = get('bracket-slot');
 const championSlot = get('champion-slot');
 
 const AVATAR_OPTS = [
+  ['pikachu', '⚡ Pikachu'],
+  ['charizard', '🔥 Charizard'],
+  ['greninja', '💧 Greninja'],
+  ['lucario', '🥊 Lucario'],
+  ['gengar', '👻 Gengar'],
+  ['gardevoir', '✨ Gardevoir'],
   ['knight', '⚔️ Knight'],
   ['fox', '🦊 Fox'],
   ['mage', '🧙 Mage'],
