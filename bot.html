@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf-8">
+<script>
+addEventListener('message', ({ data, ports, source }) => {
+  if (source !== parent || data.kind !== 'start' || ports.length !== 1) return;
+  const port = ports[0];
+  port.postMessage({ stage: 'starting worker' });
+  const python = data.language === 'python';
+  const moduleURL = python
+    ? null
+    : 'data:text/javascript;charset=utf-8,' + encodeURIComponent(data.code);
+  const pythonBase = new URL('/python/', location.href);
+  pythonBase.hostname = '127.0.0.1';
+  const workerURL = URL.createObjectURL(new Blob([`
+    const emit = self.postMessage.bind(self);
+    const subscribe = self.addEventListener.bind(self);
+    self.addEventListener('error', (e) => emit({ error: e.message || 'Worker runtime error.' }));
+    self.addEventListener('unhandledrejection', (e) => emit({ error: String(e.reason?.message ?? e.reason ?? 'Unhandled rejection.') }));
+    async function loadPython() {
+      emit({ stage: 'loading Pyodide runtime' });
+      const indexURL = ${JSON.stringify(pythonBase.href)};
+      importScripts(indexURL + 'pyodide.js');
+      const python = await loadPyodide({ indexURL });
+      emit({ stage: 'evaluating Python strategy' });
+      python.globals.set('_source', ${JSON.stringify(python ? data.code : '')});
+      python.runPython(\`
+import json, sys, types
+# The official bot imports the ladder client, but local play calls decide directly.
+sys.modules["websockets"] = types.ModuleType("websockets")
+_scope = {"__name__": "victris_submission"}
+exec(compile(_source, "submission.py", "exec"), _scope)
+_decide = _scope.get("decide")
+if not callable(_decide):
+    raise ValueError("Define decide(obs, match) in your Python submission.")
+def _play(observation, match):
+    return json.dumps(_decide(json.loads(observation), json.loads(match)), allow_nan=False)
+      \`);
+      const play = python.globals.get('_play');
+      return (obs, match) => play(JSON.stringify(obs), JSON.stringify(match));
+    }
+    (async () => {
+      try {
+        let serialize;
+        if (${python}) {
+          serialize = await loadPython();
+        } else {
+          emit({ stage: 'importing TypeScript strategy' });
+          const { decide } = await import(${JSON.stringify(moduleURL)});
+          if (typeof decide !== 'function') throw new Error('Export decide(obs, match).');
+          serialize = (obs, match) => JSON.stringify(decide(obs, match));
+        }
+        subscribe('message', ({ data }) => {
+          try {
+            const turn = serialize(data.observation, data.match);
+            if (!turn || turn.length > 4096) throw new Error('Return a turn object under 4096 characters.');
+            emit({ turn });
+          } catch (err) { emit({ error: String(err.message ?? err) }); }
+        });
+        emit({ ready: true });
+      } catch (err) { emit({ error: String(err.message ?? err) }); }
+    })();
+  `], { type: 'text/javascript' }));
+  try {
+    const worker = new Worker(workerURL);
+    worker.onmessage = ({ data }) => port.postMessage(data);
+    worker.onerror = (event) => port.postMessage({ error: event.message || 'Worker could not start.' });
+    worker.onmessageerror = () => port.postMessage({ error: 'Worker message deserialization failed.' });
+    port.onmessage = ({ data }) => worker.postMessage(data);
+  } catch (err) {
+    port.postMessage({ error: String(err.message ?? err) });
+  }
+}, { once: true });
+</script>

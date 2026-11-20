@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Victris Match Runner &amp; Tournament Host</title>
+<style>
+:root{color-scheme:dark;font:15px/1.45 system-ui,-apple-system,sans-serif;background:#040812;color:#eef3fc}
+body{margin:18px auto;padding:0 18px;max-width:1320px}
+h1{margin:0 0 4px;font-size:clamp(1.6rem,3.4vw,2.2rem);letter-spacing:-.02em}
+h2{margin:0 0 10px;font-size:1.06rem}
+h3{margin:10px 0 6px;font-size:.9rem;color:#7dd3fc;text-transform:uppercase;letter-spacing:.05em}
+p{color:#94a3b8;margin:5px 0}
+a{color:#7dd3fc}
+.layout{display:grid;grid-template-columns:420px 1fr;gap:20px;align-items:start;margin-top:12px}
+.panel,form,section{background:#0f182b;border:1px solid #24334f;border-radius:14px;padding:15px;margin:0 0 14px;box-shadow:0 14px 36px rgba(2,6,23,.5)}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.tab{background:#0a1222;color:#94a3b8;border:1px solid #25344f;border-radius:10px;padding:9px 12px;font-weight:700;cursor:pointer}
+.tab.active{background:linear-gradient(135deg,rgba(56,189,248,.22),rgba(129,140,248,.22));color:#f0f9ff;border-color:#38bdf8}
+.teams,.options{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+fieldset{min-width:0;border:1px solid #2c3e5c;border-radius:9px;padding:10px}
+legend,strong{color:#7dd3fc}
+label{display:block;margin-bottom:9px;font-size:.85rem}
+input,select,button{font:inherit}
+input,select{box-sizing:border-box;width:100%;margin-top:4px;padding:6px 8px;background:#080f1e;color:#eef3fc;border:1px solid #3a4f73;border-radius:6px}
+button{background:linear-gradient(135deg,#38bdf8,#818cf8);color:#06101f;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;transition:transform 80ms,filter 120ms}
+button:hover:not(:disabled){filter:brightness(1.09)}
+button:active:not(:disabled){transform:scale(.97)}
+button.secondary{background:#1b273d;color:#dbeafe;border:1px solid #314361;font-weight:600}
+button.danger{background:#3b1622;color:#fecdd3;border:1px solid #7f1d1d;font-weight:600}
+button.toggle{background:#162033;color:#94a3b8;border:1px solid #2a3a54;padding:4px 9px;font-size:.78rem;font-weight:600}
+button.toggle.active{background:rgba(56,189,248,.22);color:#e0f2fe;border-color:#38bdf8}
+button:disabled{opacity:.45;cursor:not-allowed}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.dropzone{border:2px dashed #334a6e;border-radius:10px;padding:14px;text-align:center;background:#080f1e;cursor:pointer;transition:border-color 120ms,background 120ms;margin-bottom:10px}
+.dropzone.dragover{border-color:#38bdf8;background:rgba(56,189,248,.08)}
+.roster-list{display:flex;flex-direction:column;gap:6px;max-height:210px;overflow:auto;margin:8px 0}
+.roster-row{display:grid;grid-template-columns:1fr 98px auto auto;gap:6px;align-items:center;background:#080f1e;border:1px solid #22304a;border-radius:8px;padding:5px 7px}
+.roster-row input,.roster-row select{margin:0;padding:4px 6px;font-size:.82rem}
+.lang-badge{font-size:.68rem;font-weight:800;padding:2px 5px;border-radius:4px;background:#1e293b;color:#7dd3fc}
+.lang-badge.py{color:#fde047}
+.champion-banner{background:linear-gradient(135deg,rgba(245,158,11,.22),rgba(56,189,248,.2));border:1px solid #f59e0b;border-radius:12px;padding:12px 14px;text-align:center;margin-bottom:12px}
+.champion-banner .champ-title{font-size:.76rem;text-transform:uppercase;letter-spacing:.08em;color:#fde68a;font-weight:800}
+.champion-banner .champ-name{font-size:1.35rem;font-weight:900;color:#fff;margin-top:2px}
+.standings{width:100%;border-collapse:collapse;font-size:.82rem;margin-bottom:10px}
+.standings th,.standings td{padding:5px 7px;border-bottom:1px solid #1e293b;text-align:left}
+.standings th{color:#94a3b8;font-size:.74rem;text-transform:uppercase}
+.standings tr.top2 td{color:#f0f9ff;font-weight:700;background:rgba(56,189,248,.07)}
+.round-block{margin-bottom:10px}
+.match-card{background:#080f1e;border:1px solid #22314d;border-radius:9px;padding:8px 10px;margin-bottom:6px;font-size:.83rem}
+.match-card.pending{border-color:#38bdf866}
+.match-card.running{border-color:#f59e0b;box-shadow:0 0 12px rgba(245,158,11,.25)}
+.match-card.done{border-color:#1e3a2f}
+.match-card.final{border-color:#f59e0b99;background:linear-gradient(135deg,#0c1528,#1c1610)}
+.match-top{display:flex;justify-content:space-between;align-items:center;gap:6px;font-weight:700}
+.match-meta{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-top:5px;font-size:.75rem;color:#94a3b8;flex-wrap:wrap}
+.match-meta button{padding:2px 8px;font-size:.74rem}
+.win-name{color:#4ade80}
+#stage:fullscreen{background:#040812;padding:22px;display:flex;flex-direction:column;justify-content:center;overflow:auto;border:0;border-radius:0}
+#stage:fullscreen .canvas-wrap canvas{max-width:min(76vh * 1.344, 94vw)}
+.stage-head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.toolbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.hud{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.fighter-card{background:#080f1e;border:1px solid #22304a;border-radius:10px;padding:9px 12px}
+.fighter-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:6px}
+.fighter-name{font-weight:800;font-size:.96rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.p1-text{color:#38bdf8}.p2-text{color:#fb7185}
+.hp-track{height:10px;background:#1e293b;border-radius:999px;overflow:hidden;margin-bottom:7px;box-shadow:inset 0 1px 3px rgba(0,0,0,.6)}
+.hp-fill{height:100%;transition:width 80ms linear;border-radius:999px}
+.p1-bar{background:linear-gradient(90deg,#0284c7,#38bdf8)}.p2-bar{background:linear-gradient(90deg,#e11d48,#fb7185)}
+.fighter-sub{display:flex;gap:5px;flex-wrap:wrap;min-height:22px}
+.pill{font-size:.69rem;font-weight:700;padding:2px 6px;border-radius:5px;letter-spacing:.02em}
+.pill-ready{background:rgba(56,189,248,.16);color:#bae6fd;border:1px solid rgba(56,189,248,.35)}
+.pill-cd{background:rgba(15,23,42,.85);color:#64748b;border:1px solid #1e293b}
+.pill-power{background:rgba(245,158,11,.24);color:#fde68a;border:1px solid rgba(245,158,11,.6)}
+.pill-stun{background:rgba(250,204,21,.25);color:#fef08a;border:1px solid rgba(250,204,21,.6)}
+.pill-slow{background:rgba(125,211,252,.22);color:#e0f2fe;border:1px solid rgba(125,211,252,.55)}
+.canvas-wrap{display:flex;justify-content:center;background:#040812;border:1px solid #1f2e47;border-radius:12px;padding:6px;box-shadow:inset 0 0 28px rgba(0,0,0,.75)}
+canvas{width:100%;max-width:780px;height:auto;aspect-ratio:780/580;display:block;border-radius:8px;touch-action:none}
+.scrubber-wrap{position:relative;flex:1;min-width:160px;display:flex;flex-direction:column;gap:3px}
+.markers{position:relative;height:8px;width:100%;pointer-events:none}
+.marker-pip{position:absolute;top:0;width:4px;height:8px;border-radius:2px;transform:translateX(-50%);opacity:.9}
+.controls{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.controls button{padding:5px 10px;font-size:.82rem}
+.scrubber{width:100%;margin:0;accent-color:#38bdf8}
+.meta-bar{display:flex;justify-content:space-between;font-size:.83rem;color:#94a3b8;margin-top:6px;flex-wrap:wrap;gap:8px}
+.feed{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;min-height:24px}
+.feed-chip{font-size:.75rem;font-weight:600;background:#080f1e;border:1px solid #2b3a54;border-radius:999px;padding:2px 9px}
+.stats-box{display:none;margin-top:10px;background:#080f1e;border:1px solid #23334e;border-radius:10px;padding:10px 12px;font-size:.82rem}
+.stats-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:4px 12px;align-items:center}
+.stats-val-l{text-align:right;font-weight:700;color:#7dd3fc}
+.stats-val-r{text-align:left;font-weight:700;color:#fda4af}
+.stats-lbl{text-align:center;color:#94a3b8;font-size:.76rem}
+.hint{font-size:.76rem;color:#64748b;margin-top:8px}
+.hidden{display:none !important}
+li{margin:.55em 0;line-height:1.5;font-size:.88rem}
+li button{padding:3px 8px;font-size:.78rem;margin:0 5px}
+#status{min-height:1.3em;color:#e2e8f0;font-weight:500}
+iframe{display:none}
+@media(max-width:1040px){.layout{grid-template-columns:1fr}}
+@media(max-width:520px){.teams,.options,.hud{grid-template-columns:1fr}}
+</style>
+<main>
+  <h1>Victris Tournament Host</h1>
+  <p>Run <code>.ts</code> &amp; <code>.py</code> bots live in the 3D coliseum, host full interactive tournaments with a Best-of-3 Grand Final, or export <code>.jsonl.gz</code> replays.</p>
+
+  <div class="layout">
+    <div>
+      <div class="tabs">
+        <button id="tab-tournament" class="tab active" type="button">🏆 Tournament Mode</button>
+        <button id="tab-single" class="tab" type="button">⚔️ Single 1v1 Match</button>
+      </div>
+
+      <!-- Shared Speed & Seed Bar -->
+      <div class="panel" style="padding:12px 14px">
+        <div class="options" style="align-items:end">
+          <label style="margin:0">Playback Speed
+            <select id="speed">
+              <option value="100">1× Live</option>
+              <option value="50" selected>2× Fast</option>
+              <option value="25">4× Turbo</option>
+              <option value="0">Instant</option>
+            </select>
+          </label>
+          <label style="margin:0">Seed
+            <div style="display:flex;gap:5px;align-items:center;margin-top:4px">
+              <input id="seed" type="number" required min="0" max="2147483600" value="42" style="margin-top:0">
+              <button id="btn-roll-seed" class="secondary" type="button" title="Roll random seed" style="padding:6px 8px;flex-shrink:0">🎲</button>
+            </div>
+          </label>
+        </div>
+        <label style="margin:7px 0 0;display:inline-flex;align-items:center;gap:6px;font-size:.78rem;color:#94a3b8;cursor:pointer">
+          <input id="auto-seed" type="checkbox" checked style="width:auto;margin:0;accent-color:#38bdf8"> Auto-random seed per match (uncheck or type a seed to lock 🔒)
+        </label>
+      </div>
+
+      <!-- TOURNAMENT MODE PANEL -->
+      <div id="pane-tournament">
+        <section>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <h2 style="margin:0">1. Bot Roster (<span id="roster-count">0</span>)</h2>
+            <div style="display:flex;gap:5px">
+              <button id="btn-add-ts-starter" class="secondary" type="button" style="padding:3px 8px;font-size:.75rem">+ TS Starter</button>
+              <button id="btn-add-py-starter" class="secondary" type="button" style="padding:3px 8px;font-size:.75rem">+ PY Starter</button>
+            </div>
+          </div>
+
+          <div id="dropzone" class="dropzone">
+            <strong>Drop <code>.ts</code> / <code>.py</code> bot files here</strong><br>
+            <span style="font-size:.8rem;color:#94a3b8">or click to select multiple submissions at once</span>
+            <input id="roster-files" type="file" accept=".ts,.py" multiple class="hidden">
+          </div>
+
+          <div id="roster-list" class="roster-list"></div>
+
+          <div class="options" style="margin-top:10px">
+            <label style="margin:0">Tournament Format
+              <select id="t-format">
+                <option value="single-elim">Single Elimination (Bo3 Final)</option>
+                <option value="round-robin">Round Robin → Top-2 Bo3 Final</option>
+                <option value="swiss">Swiss (3 Rds) → Top-2 Bo3 Final</option>
+              </select>
+            </label>
+            <label style="margin:0;display:flex;align-items:center;gap:6px;padding-top:18px;font-size:.82rem;cursor:pointer">
+              <input id="t-shuffle" type="checkbox" checked style="width:auto;margin:0;accent-color:#38bdf8"> Shuffle seeds
+            </label>
+          </div>
+
+          <div class="actions" style="margin-top:12px">
+            <button id="btn-start-tourney" type="button" disabled>Start Tournament</button>
+            <button id="btn-reset-tourney" class="secondary hidden" type="button">Reset Bracket</button>
+          </div>
+        </section>
+
+        <section id="tourney-board" class="hidden">
+          <div id="champion-slot"></div>
+          <div class="actions" style="margin:0 0 12px">
+            <button id="btn-next-match" type="button">▶ Run Next Match (Live)</button>
+            <button id="btn-sim-round" class="secondary" type="button">⚡ Sim Round (Instant)</button>
+          </div>
+          <div id="standings-slot"></div>
+          <div id="bracket-slot"></div>
+        </section>
+      </div>
+
+      <!-- SINGLE 1v1 MATCH PANEL -->
+      <div id="pane-single" class="hidden">
+        <form id="match">
+          <div class="teams">
+            <fieldset>
+              <legend>Team A</legend>
+              <label>Name<input id="name-a" required maxlength="40" value="Team A"></label>
+              <label>Character
+                <select id="avatar-a">
+                  <option value="knight" selected>⚔️ Cyber Knight</option>
+                  <option value="fox">🦊 Neon Fox</option>
+                  <option value="mage">🧙 Frost Mage</option>
+                  <option value="mech">🤖 Void Mech</option>
+                  <option value="dragon">🐉 Mecha Dragon</option>
+                  <option value="ninja">🥷 Shadow Ninja</option>
+                </select>
+              </label>
+              <label>Strategy (.ts / .py)<input id="file-a" required type="file" accept=".ts,.py"></label>
+            </fieldset>
+            <fieldset>
+              <legend>Team B</legend>
+              <label>Name<input id="name-b" required maxlength="40" value="Team B"></label>
+              <label>Character
+                <select id="avatar-b">
+                  <option value="knight">⚔️ Cyber Knight</option>
+                  <option value="fox" selected>🦊 Neon Fox</option>
+                  <option value="mage">🧙 Frost Mage</option>
+                  <option value="mech">🤖 Void Mech</option>
+                  <option value="dragon">🐉 Mecha Dragon</option>
+                  <option value="ninja">🥷 Shadow Ninja</option>
+                </select>
+              </label>
+              <label>Strategy (.ts / .py)<input id="file-b" required type="file" accept=".ts,.py"></label>
+            </fieldset>
+          </div>
+          <label>Format
+            <select id="format">
+              <option value="qualifier">Qualifier · first to 1 win</option>
+              <option value="final">Final · best of 3 (first to 2)</option>
+            </select>
+          </label>
+          <div class="actions">
+            <button id="run" type="submit">Run matchup</button>
+          </div>
+        </form>
+        <p style="margin-bottom:12px"><a href="/strategy.ts" download>Download TS starter</a> · <a href="/bot.py" download>Download Python starter</a></p>
+      </div>
+
+      <!-- Shared Status & Last-Game Stats -->
+      <section aria-labelledby="results">
+        <h2 id="results">Live Status &amp; Game Log</h2>
+        <p id="status" role="status">Add 2+ bots to start a tournament, or switch to Single 1v1 Match.</p>
+        <ol id="games"></ol>
+        <div id="stats-box" class="stats-box"></div>
+      </section>
+    </div>
+
+    <!-- LIVE 3D COLISEUM STAGE -->
+    <section id="stage" aria-labelledby="arena-title">
+      <div class="stage-head">
+        <div>
+          <h2 id="arena-title" style="margin:0;display:inline">Live Arena</h2>
+          <span id="meta-info" style="font-size:.82rem;color:#94a3b8;margin-left:8px">Waiting for match…</span>
+        </div>
+        <div class="toolbar">
+          <button id="btn-view" class="toggle active" type="button" title="Toggle 3D Coliseum / 2.5D Flat">3D Coliseum</button>
+          <button id="btn-autocam" class="toggle" type="button" title="Dynamic duel camera tracking">🎥 Auto-Cam</button>
+          <button id="btn-sight" class="toggle" type="button" title="Show 8-tile vision radius">👁 Sight</button>
+          <button id="btn-danger" class="toggle" type="button" title="Show incoming danger tiles">🎯 Danger</button>
+          <button id="btn-rot-l" class="toggle" type="button" title="Rotate left">⟲</button>
+          <button id="btn-rot-r" class="toggle" type="button" title="Rotate right">⟳</button>
+          <button id="btn-reset-cam" class="toggle" type="button" title="Reset camera (R)">Reset</button>
+          <button id="btn-sfx" class="toggle active" type="button" title="Toggle combat SFX">🔊 SFX</button>
+          <button id="btn-bgm-next" class="toggle" type="button" title="Shuffle next Trihorn BGM track">🎵 Shuffle BGM</button>
+          <button id="btn-bgm-toggle" class="toggle" type="button" title="Play/Pause BGM">▶</button>
+          <input id="bgm-vol" type="range" min="0" max="1" step="0.05" value="0.38" title="BGM Volume" style="width:58px;margin:0;accent-color:#38bdf8">
+          <button id="btn-fullscreen" class="toggle" type="button" title="Fullscreen (F)">⛶ Fullscreen</button>
+        </div>
+      </div>
+
+      <div class="hud">
+        <div class="fighter-card">
+          <div class="fighter-top">
+            <span id="p1-name" class="fighter-name p1-text">Seat 1</span>
+            <span id="p1-hp-text" style="font-size:.85rem;font-weight:700">130 / 130</span>
+          </div>
+          <div class="hp-track"><div id="p1-hp-bar" class="hp-fill p1-bar" style="width:100%"></div></div>
+          <div id="p1-status" class="fighter-sub"></div>
+        </div>
+        <div class="fighter-card">
+          <div class="fighter-top">
+            <span id="p2-name" class="fighter-name p2-text">Seat 2</span>
+            <span id="p2-hp-text" style="font-size:.85rem;font-weight:700">130 / 130</span>
+          </div>
+          <div class="hp-track"><div id="p2-hp-bar" class="hp-fill p2-bar" style="width:100%"></div></div>
+          <div id="p2-status" class="fighter-sub"></div>
+        </div>
+      </div>
+
+      <div class="canvas-wrap">
+        <canvas id="arena" width="780" height="580"></canvas>
+      </div>
+
+      <div class="controls">
+        <button id="btn-prev" class="secondary" type="button" title="Previous tick (←)" disabled>◀</button>
+        <button id="btn-pause" class="secondary" type="button" title="Play/Pause (Space)" disabled>Pause</button>
+        <button id="btn-next" class="secondary" type="button" title="Next tick (→)" disabled>▶</button>
+        <button id="btn-skip" class="secondary" type="button" disabled>Skip</button>
+        <div class="scrubber-wrap">
+          <div id="markers" class="markers"></div>
+          <input id="scrubber" class="scrubber" type="range" min="0" max="0" value="0" disabled>
+        </div>
+      </div>
+      <div class="meta-bar">
+        <span id="tick-info">Tick 0 / 600</span>
+        <span id="mode-info">Idle</span>
+      </div>
+      <div id="feed" class="feed"></div>
+      <div class="hint">Interactive: Drag arena to orbit 3D · Scroll to zoom · Keys: <code>Space</code> Play/Pause · <code>←/→</code> Step tick · <code>R</code> Reset cam · <code>F</code> Fullscreen</div>
+    </section>
+  </div>
+</main>
+<script type="module" src="/app.mjs"></script>
