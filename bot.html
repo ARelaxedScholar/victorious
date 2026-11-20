@@ -12,44 +12,79 @@ addEventListener('message', ({ data, ports, source }) => {
   const pythonBase = new URL('/python/', location.href);
   pythonBase.hostname = '127.0.0.1';
   const workerURL = URL.createObjectURL(new Blob([`
-    const emit = self.postMessage.bind(self);
+    const rawEmit = self.postMessage.bind(self);
     const subscribe = self.addEventListener.bind(self);
     const jsonStringify = JSON.stringify;
     const isFiniteNum = Number.isFinite;
+    const perfNow = performance.now.bind(performance);
+    const objCreate = Object.create;
+    const objAssign = Object.assign;
 
-    // Lock down dangerous Worker globals before any untrusted code runs
+    // Emit null-prototype objects so Object.prototype pollution inside the worker cannot inject keys
+    const emit = (payload) => rawEmit(objAssign(objCreate(null), payload));
+
+    // Walk the entire prototype chain of self to neutralize dangerous Worker APIs
     function hardenGlobals() {
-      const blocked = ['postMessage', 'Worker', 'SharedWorker', 'BroadcastChannel', 'MessageChannel', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'caches', 'indexedDB'];
-      for (const name of blocked) {
-        try {
-          Object.defineProperty(self, name, {
-            value: undefined,
-            writable: false,
-            configurable: false,
-          });
-        } catch {}
+      const blocked = [
+        'postMessage', 'Worker', 'SharedWorker', 'BroadcastChannel', 'MessageChannel',
+        'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts',
+        'caches', 'indexedDB', 'close', 'addEventListener', 'removeEventListener',
+        'dispatchEvent', 'onmessage', 'onmessageerror',
+      ];
+      for (let target = self; target && target !== Object.prototype; target = Object.getPrototypeOf(target)) {
+        for (const name of blocked) {
+          try {
+            Object.defineProperty(target, name, {
+              value: undefined,
+              writable: false,
+              configurable: false,
+            });
+          } catch {}
+        }
       }
+      try {
+        if (self.navigator && 'sendBeacon' in self.navigator) {
+          Object.defineProperty(self.navigator, 'sendBeacon', { value: undefined, writable: false, configurable: false });
+        }
+      } catch {}
     }
 
-    self.addEventListener('error', (e) => emit({ error: e.message || 'Worker runtime error.' }));
-    self.addEventListener('unhandledrejection', (e) => emit({ error: String(e.reason?.message ?? e.reason ?? 'Unhandled rejection.') }));
+    subscribe('error', (e) => emit({ error: e.message || 'Worker runtime error.' }));
+    subscribe('unhandledrejection', (e) => emit({ error: String(e.reason?.message ?? e.reason ?? 'Unhandled rejection.') }));
 
     async function loadPython() {
       emit({ stage: 'loading Pyodide runtime' });
       const indexURL = ${JSON.stringify(pythonBase.href)};
       importScripts(indexURL + 'pyodide.js');
       const python = await loadPyodide({ indexURL });
-      // Now that Pyodide is loaded, lock down JS Worker globals
       hardenGlobals();
       emit({ stage: 'evaluating Python strategy' });
       python.globals.set('_source', ${JSON.stringify(python ? data.code : '')});
       python.runPython(\`
-import json, sys, types
+import builtins, json, sys, types
 _loads = json.loads
 _dumps = json.dumps
-# Block Python -> JS bridge so untrusted bots cannot touch Worker globals
-for _mod in ("js", "pyodide_js", "pyodide.ffi", "pyodide.http"):
-    sys.modules[_mod] = None
+_orig_import = builtins.__import__
+
+# Strip Pyodide JS-bridge finders from sys.meta_path so bots cannot reload 'js' after deleting sys.modules['js']
+sys.meta_path[:] = [
+    f for f in sys.meta_path
+    if "pyodide" not in type(f).__module__.lower() and "jsfinder" not in type(f).__name__.lower()
+]
+
+_BLOCKED_PREFIXES = ("js", "pyodide", "_pyodide", "micropip", "emscripten", "urllib", "http", "socket", "ftplib", "smtplib")
+for _name in list(sys.modules):
+    if _name == "js" or _name.startswith(("js.", "pyodide", "_pyodide", "micropip", "emscripten")):
+        sys.modules[_name] = None
+
+def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    root = name.split(".", 1)[0]
+    if root in _BLOCKED_PREFIXES or name.startswith(("pyodide", "_pyodide")):
+        raise ModuleNotFoundError(f"Import of '{name}' is disabled in sandbox.")
+    return _orig_import(name, globals, locals, fromlist, level)
+
+builtins.__import__ = _safe_import
+
 # The official bot imports the ladder client, but local play calls decide directly.
 sys.modules["websockets"] = types.ModuleType("websockets")
 _scope = {"__name__": "victris_submission"}
@@ -88,9 +123,9 @@ def _play(observation, match):
         subscribe('message', ({ data }) => {
           const seq = data?.seq;
           try {
-            const t0 = performance.now();
+            const t0 = perfNow();
             const turn = serialize(data.observation, data.match);
-            const ms = performance.now() - t0;
+            const ms = perfNow() - t0;
             if (typeof turn !== 'string' || !turn || turn.length > 4096) {
               throw new Error('Return a turn object under 4096 characters.');
             }

@@ -46,7 +46,9 @@ function sanitizeTurn(raw, teamName) {
         !Array.isArray(raw.attack.target) ||
         raw.attack.target.length !== 2 ||
         !Number.isFinite(raw.attack.target[0]) ||
-        !Number.isFinite(raw.attack.target[1])
+        !Number.isFinite(raw.attack.target[1]) ||
+        Math.abs(raw.attack.target[0]) > 100 ||
+        Math.abs(raw.attack.target[1]) > 100
       ) {
         throw new Error(teamName + ' returned an invalid attack target.');
       }
@@ -638,10 +640,16 @@ async function runGame(teams, seed, gameNumber, { forceInstant = false } = {}) {
       }
 
       const t0 = performance.now();
-      const [first, second] = await Promise.all([
+      const settled = await Promise.allSettled([
         workers[0].turn(obs1, matches[0]),
         workers[1].turn(obs2, matches[1]),
       ]);
+      if (settled[0].status === 'rejected' && settled[1].status === 'rejected') {
+        throw new Error(`Both bots failed on tick ${obs1.tick}: ${settled[0].reason?.message} | ${settled[1].reason?.message}`);
+      }
+      if (settled[0].status === 'rejected') throw settled[0].reason;
+      if (settled[1].status === 'rejected') throw settled[1].reason;
+      const [first, second] = [settled[0].value, settled[1].value];
       game.step({ 1: first, 2: second });
 
       if (delay > 0 && !liveSkip && !forceInstant) {

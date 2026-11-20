@@ -83,8 +83,14 @@ async function serveAudio(req, res, track) {
 
 const server = createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  const fetchSite = req.headers['sec-fetch-site'];
   try {
     if (req.method === 'POST' && req.url === '/strip') {
+      if (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none') {
+        res.writeHead(403).end('Cross-site request blocked.');
+        return;
+      }
       const chunks = [];
       let bytes = 0;
       for await (const chunk of req) {
