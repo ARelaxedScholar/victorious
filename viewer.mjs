@@ -464,6 +464,8 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
   let frameStartTime = performance.now();
   let tickDurationMs = 50;
   let banner = '';
+  let bannerSince = 0;
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   let lastEventTick = -1;
 
   // VFX pools
@@ -477,6 +479,7 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
   const shouts = [];
   const feedItems = [];
   const facing = { 1: 0, 2: Math.PI };
+  const hitDirection = new Map();
   const hitFlash = { 1: 0, 2: 0 };
   const recoil = { 1: 0, 2: 0 };
   let shakeMag = 0;
@@ -674,7 +677,7 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
         }
         case 'dash': {
           if (ev.from && ev.to) {
-            trails.push({ from: ev.from, to: ev.to, color: colorOf(ev.fighter), life: 1, kind: 'dash' });
+            trails.push({ from: ev.from, to: ev.to, color: colorOf(ev.fighter), fighter: ev.fighter, life: 1, kind: 'dash' });
             facing[ev.fighter] = Math.atan2(ev.to[1] - ev.from[1], ev.to[0] - ev.from[0]);
           }
           break;
@@ -695,6 +698,12 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
         case 'hit': {
           const t = fMap.get(ev.target);
           if (t) {
+            const origin = fMap.get(ev.attacker)?.pos;
+            if (origin) {
+              const dx = t.pos[0] - origin[0], dy = t.pos[1] - origin[1];
+              const distance = Math.hypot(dx, dy) || 1;
+              hitDirection.set(t.id, [dx / distance, dy / distance]);
+            }
             hitFlash[ev.target] = 1;
             const col = ev.attack === 'frostburst' ? PALETTE.frostBright : colorOf(ev.attacker);
             spawnBurst3D(t.pos[0] + 0.5, t.pos[1] + 0.5, 0.7, col, 16, 0.16, 0.18, 3.3);
@@ -1000,7 +1009,8 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
 
     // 3. Frostburst 3x3 Icy Floor Tiles
     for (const area of currFrame.areas) {
-      const urgent = area.ticks_left <= 2;
+      const ticksLeft = area.ticks_left ?? Math.max(0, area.explodes_tick - currFrame.tick + 1);
+      const urgent = ticksLeft <= 2;
       const pulse = urgent ? 0.44 + 0.22 * Math.sin(now / 55) : 0.24;
       for (const [tx, ty] of area.tiles ?? []) {
         drawTileQuad(proj, tx + 0.05, ty + 0.05, 0.03);
@@ -1013,13 +1023,31 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
       if (area.pos) {
         const p = proj.project(area.pos[0] + 0.5, area.pos[1] + 0.5, 0.5);
         ctx.save();
+        // Six inward-moving teeth follow the fuse; their footprint stays on the arena floor.
+        const fuse = Math.max(0, ticksLeft - alpha);
+        const radius = 0.32 + Math.min(1.2, fuse * 0.22);
+        const cx = area.pos[0] + 0.5, cy = area.pos[1] + 0.5;
+        ctx.strokeStyle = '#ddf8ff';
+        ctx.lineWidth = 2;
+        for (let n = 0; n < 6; n++) {
+          const angle = n * Math.PI / 3;
+          const point = (r, a) => proj.project(cx + r * Math.cos(a), cy + r * Math.sin(a), 0.08);
+          const left = point(radius + 0.26, angle - 0.12);
+          const tip = point(radius, angle);
+          const right = point(radius + 0.26, angle + 0.12);
+          ctx.beginPath();
+          ctx.moveTo(left.x, left.y);
+          ctx.lineTo(tip.x, tip.y);
+          ctx.lineTo(right.x, right.y);
+          ctx.stroke();
+        }
         ctx.fillStyle = '#f0f9ff';
         ctx.shadowColor = PALETTE.frost;
         ctx.shadowBlur = 10;
         ctx.font = '800 13px system-ui';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(String(area.ticks_left), p.x, p.y);
+        ctx.fillText(String(ticksLeft), p.x, p.y);
         ctx.restore();
       }
     }
@@ -1040,6 +1068,15 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
+      if (tr.kind === 'dash' && !reducedMotion.matches) {
+        ctx.shadowBlur = 0;
+        for (const t of [0.12, 0.42, 0.7]) {
+          const echo = proj.project(lerp(tr.from[0], tr.to[0], t) + 0.5, lerp(tr.from[1], tr.to[1], t) + 0.5, 0.6);
+          ctx.globalAlpha = tr.life * (0.12 + t * 0.28);
+          drawCharacter(ctx, meta.avatars[tr.fighter - 1], echo.x, echo.y, echo.s * 0.56,
+            tr.color, tr.color, '#e0f2fe', b.x - a.x, now, false, 0, 0.65);
+        }
+      }
       ctx.restore();
       tr.life -= 0.06;
       if (tr.life <= 0) trails.splice(i, 1);
@@ -1205,7 +1242,9 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
       // Demeo-style tactile parabolic miniature hop when stepping/dashing between tiles!
       const hopZ = moving ? Math.sin(alpha * Math.PI) * Math.min(0.65, 0.34 + moveDist * 0.1) : 0;
       const ground = proj.project(gx, gy, 0.02);
-      const bodyPt = proj.project(gx, gy, 0.55 + hopZ);
+      const [dx, dy] = hitDirection.get(f.id) ?? [0, 0];
+      const stagger = reducedMotion.matches ? 0 : hitFlash[f.id] ** 2 * 0.44;
+      const bodyPt = proj.project(gx + dx * stagger, gy + dy * stagger, 0.55 + hopZ);
       const headPt = proj.project(gx, gy, 1.55 + hopZ);
       const ang = facing[f.id] ?? 0;
       const aimPt = proj.project(gx + Math.cos(ang) * 0.72, gy + Math.sin(ang) * 0.72, 0.55 + hopZ);
@@ -1252,6 +1291,30 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
           ctx.ellipse(ground.x, ground.y, r * 1.02, r * 1.02 * proj.tiltY, 0, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * hpFrac);
           ctx.stroke();
           ctx.restore();
+
+          if (banner && f.id === meta.winner) {
+            // A pool of light and rising gold sparks frame the winning miniature.
+            ctx.save();
+            const glow = ctx.createLinearGradient(0, ground.y - r * 6, 0, ground.y);
+            glow.addColorStop(0, 'rgba(255,211,117,0)');
+            glow.addColorStop(1, 'rgba(255,211,117,0.32)');
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.moveTo(ground.x - r * 1.4, ground.y);
+            ctx.lineTo(ground.x - r * 2.6, ground.y - r * 6);
+            ctx.lineTo(ground.x + r * 2.6, ground.y - r * 6);
+            ctx.lineTo(ground.x + r * 1.4, ground.y);
+            ctx.fill();
+            for (let k = 0; k < 12; k++) {
+              const phase = (k / 12 + (reducedMotion.matches ? 0 : (now - bannerSince) / 2200)) % 1;
+              const angle = k * 2.4;
+              const spark = proj.project(gx + Math.cos(angle) * 0.85, gy + Math.sin(angle) * 0.85, 0.2 + phase * 2.5);
+              ctx.globalAlpha = Math.sin(phase * Math.PI);
+              ctx.fillStyle = '#ffe6a8';
+              ctx.fillRect(spark.x - 1, spark.y - 2, 2, 4);
+            }
+            ctx.restore();
+          }
 
           // Power buff crackling golden halo
           if ((f.buffs?.power ?? 0) > 0) {
@@ -1554,22 +1617,22 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
     // 11. Victory Banner
     if (banner) {
       ctx.save();
-      const grad = ctx.createLinearGradient(0, H / 2 - 42, 0, H / 2 + 42);
-      grad.addColorStop(0, 'rgba(5, 9, 20, 0.92)');
-      grad.addColorStop(1, 'rgba(15, 23, 42, 0.92)');
+      const enter = reducedMotion.matches ? 1 : clamp((now - bannerSince) / 340, 0, 1);
+      ctx.translate(0, (1 - enter) ** 2 * 48);
+      const y = H - 65;
+      const grad = ctx.createLinearGradient(0, y - 22, 0, H);
+      grad.addColorStop(0, 'rgba(5,9,20,0)');
+      grad.addColorStop(0.5, 'rgba(5,9,20,0.93)');
+      grad.addColorStop(1, '#080e1e');
       ctx.fillStyle = grad;
-      ctx.fillRect(0, H / 2 - 42, W, 84);
-      ctx.fillStyle = PALETTE.p1;
-      ctx.fillRect(0, H / 2 - 42, W, 2.5);
-      ctx.fillStyle = PALETTE.p2;
-      ctx.fillRect(0, H / 2 + 40, W, 2.5);
-      ctx.fillStyle = '#f8fafc';
-      ctx.shadowColor = 'rgba(56, 189, 248, 0.65)';
-      ctx.shadowBlur = 16;
-      ctx.font = '800 26px system-ui';
+      ctx.fillRect(0, y - 22, W, H - y + 22);
       ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(banner, W / 2, H / 2);
+      ctx.fillStyle = '#efd396';
+      ctx.font = '700 11px system-ui';
+      ctx.fillText('MATCH RESULT', W / 2, y + 13);
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = '800 24px system-ui';
+      ctx.fillText(banner, W / 2, y + 45, W - 32);
       ctx.restore();
     }
 
@@ -1584,6 +1647,7 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
     prevFrame = null;
     currFrame = null;
     lastEventTick = -1;
+    hitDirection.clear();
     particles.length = 0;
     rings.length = 0;
     trails.length = 0;
@@ -1608,12 +1672,22 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
     }
   }
 
-  function setBanner(text) {
+  function setBanner(text, winner = meta.winner) {
+    if (text && text !== banner) bannerSince = performance.now();
+    meta.winner = winner;
     banner = text;
   }
 
   function render(frame, durationMs = 50, isScrub = false, silent = false) {
     if (!frame || !meta.map.length) return;
+    if (isScrub) {
+      hitDirection.clear();
+      hitFlash[1] = hitFlash[2] = recoil[1] = recoil[2] = 0;
+      trails.length = rings.length = particles.length = spikes.length = flashes.length = 0;
+      attackArcs.length = popups.length = shouts.length = 0;
+      shakeMag = zoomPunch = hitStopUntil = 0;
+      lastEventTick = -1;
+    }
     prevFrame = isScrub ? frame : (currFrame ?? frame);
     currFrame = frame;
     frameStartTime = performance.now();

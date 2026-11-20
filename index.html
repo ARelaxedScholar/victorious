@@ -91,13 +91,18 @@ canvas{width:100%;max-width:780px;height:auto;aspect-ratio:780/580;display:block
 .stats-val-r{text-align:left;font-weight:700;color:#fda4af}
 .stats-lbl{text-align:center;color:#94a3b8;font-size:.76rem}
 .hint{font-size:.76rem;color:#64748b;margin-top:8px}
-.hidden{display:none !important}
+.hidden,[hidden]{display:none !important}
 li{margin:.55em 0;line-height:1.5;font-size:.88rem}
 li button{padding:3px 8px;font-size:.78rem;margin:0 5px}
 #status{min-height:1.3em;color:#e2e8f0;font-weight:500}
 iframe{display:none}
 @media(max-width:1040px){.layout{grid-template-columns:1fr}}
 @media(max-width:520px){.teams,.options,.hud{grid-template-columns:1fr}}
+.moments{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px}
+.moments strong{font-size:.82rem;color:#cbd5e1;margin-right:4px}
+.moments button{display:grid;gap:3px;text-align:left;border-left:3px solid #818cf8}
+.moments small{color:#a5b4fc;font-variant-numeric:tabular-nums}
+#comparison{font-size:.85rem;color:#bae6fd}
 </style>
 <main>
   <h1>Victorious</h1>
@@ -202,7 +207,13 @@ iframe{display:none}
               <label>Strategy (.ts / .py)<input id="file-a" required type="file" accept=".ts,.py"></label>
             </fieldset>
             <fieldset>
-              <legend>Team B</legend>
+              <legend>Opponent</legend>
+              <label>Fight against<select id="opponent">
+                <option value="upload">Another uploaded bot</option>
+                <option value="mirror">Mirror · my own bot</option>
+                <option value="panel">Beat the panel · all three</option>
+              </select></label>
+              <div id="opponent-upload">
               <label>Name<input id="name-b" required maxlength="40" value="Team B"></label>
               <label>Character
                 <select id="avatar-b">
@@ -214,10 +225,10 @@ iframe{display:none}
                   <option value="ninja">🥷 Shadow Ninja</option>
                 </select>
               </label>
-              <label>Strategy (.ts / .py)<input id="file-b" required type="file" accept=".ts,.py"></label>
+              <label>Strategy (.ts / .py)<input id="file-b" required type="file" accept=".ts,.py"></label></div>
             </fieldset>
           </div>
-          <label>Format
+          <label id="format-label">Format
             <select id="format">
               <option value="qualifier">Qualifier · first to 1 win</option>
               <option value="final">Final · best of 3 (first to 2)</option>
@@ -225,7 +236,10 @@ iframe{display:none}
           </label>
           <div class="actions">
             <button id="run" type="submit">Run matchup</button>
+            <button id="rematch" type="submit" class="secondary hidden">Rematch on same seed</button>
           </div>
+        <p id="practice-result" role="status"></p>
+        <p id="comparison" role="status"></p>
         </form>
         <p style="margin-bottom:12px"><a href="/strategy.ts" download>Download TS starter</a> · <a href="/bot.py" download>Download Python starter</a></p>
       </div>
@@ -295,6 +309,7 @@ iframe{display:none}
           <input id="scrubber" class="scrubber" type="range" min="0" max="0" value="0" disabled>
         </div>
       </div>
+      <div id="moments" class="moments" aria-label="Match highlights"></div>
       <div class="meta-bar">
         <span id="tick-info">Tick 0 / 600</span>
         <span id="mode-info">Idle</span>

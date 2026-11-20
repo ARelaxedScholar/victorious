@@ -10,6 +10,7 @@ const BGM_DIR = process.env.BGM_DIR || join(ROOT_DIR, 'bgm');
 
 const files = {
   '/': ['index.html', 'text/html'],
+  '/practice.mjs': ['practice.mjs', 'text/javascript'],
   '/app.mjs': ['app.mjs', 'text/javascript'],
   '/viewer.mjs': ['viewer.mjs', 'text/javascript'],
   '/audio.mjs': ['audio.mjs', 'text/javascript'],

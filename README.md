@@ -21,6 +21,12 @@ A local, zero-dependency **live 3D/2.5D visualizer and interactive tournament ho
 * **Interactive Tournament Mode:** Drag-and-drop multiple `.ts`/`.py` submissions and run **Single Elimination**, **Round Robin → Top-2 Bo3 Final**, or **Swiss (3 Rounds) → Top-2 Bo3 Final** with automatic forfeit handling if a bot crashes or times out.
 * **Procedural Combat SFX + Custom BGM:** Synthesized Web Audio SFX out of the box. Drop any `.mp3`, `.wav`, `.ogg`, `.m4a`, or `.flac` files into a local `bgm/` folder (or point `BGM_DIR=/path/to/music`) to auto-shuffle background music during live matches.
 
+## Practice opponents
+
+In **Single 1v1 Match**, upload your strategy once. Choose **Mirror** to face a fresh instance of it, select an individual opponent, or choose **Beat the panel** to fight one game per opponent on the same seed. Each panel game stays in the game log for replay.
+
+Random and TS Starter come from the bundled [official simulator](https://victrisarena.com/guide/simulator). Pursuit is a local opponent that closes distance and fires every fourth tick. The starter’s label gives the dated raw rating for the matching `house-ts-starter` version (`starter-17`) from the [public ladder API](https://victrisarena.com/api/leaderboard). In local simulator 0.85.0 tests on seeds 0–23 with both seat orders, TS Starter beat Pursuit and Random in all 48 games per pairing, and Pursuit beat Random in all 48.
+
 ## Bot Submission Rules
 
 * **TypeScript (`.ts`):** Standalone file under 256 KiB exporting a synchronous `decide(obs, match)` using type syntax Node can strip (no external imports).

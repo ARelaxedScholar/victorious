@@ -1,3 +1,4 @@
+import { panel } from './practice.mjs';
 import { Game, encodeReplay, verifyReplay } from './arena-sim.mjs';
 import { captureFrame, createArenaViewer } from './viewer.mjs';
 import { createAudioEngine } from './audio.mjs';
@@ -158,6 +159,7 @@ let replayTimer = null;
 let activeReplay = null;
 let replayIndex = 0;
 let replayPlaying = false;
+let clipEnd = null;
 
 function stopReplayTimer() {
   if (replayTimer !== null) {
@@ -165,6 +167,7 @@ function stopReplayTimer() {
     replayTimer = null;
   }
   replayPlaying = false;
+  clipEnd = null;
 }
 
 function getTickDelayMs() {
@@ -229,6 +232,53 @@ function renderMarkers(frames) {
   markersEl.innerHTML = pips.join('');
 }
 
+function renderMoments(record) {
+  const strip = get('moments');
+  strip.replaceChildren();
+  const picks = [];
+  function offer(idx, label, detail, rank) {
+    picks.push({ idx, label, detail, rank });
+  }
+  record.frames.forEach((frame, idx) => {
+    for (const ev of frame.events ?? []) {
+      const actor = record.meta.names[(ev.attacker ?? ev.fighter) - 1];
+      if (ev.kind === 'wall_slam') offer(idx, 'Wall slam', actor, 4);
+      if (ev.kind === 'pickup') offer(idx, ev.pickup + ' pickup', actor, 2);
+      if (ev.kind === 'hit') offer(idx, ev.attack + ' hit', actor + ' · ' + ev.damage + ' damage', 3 + Math.min(ev.damage, 99) / 100);
+    }
+  });
+  const selected = [];
+  for (const candidate of picks.sort((a, b) => b.rank - a.rank)) {
+    if (selected.some(p => p.label === candidate.label || Math.abs(p.idx - candidate.idx) < 12)) continue;
+    selected.push(candidate);
+    if (selected.length === 3) break;
+  }
+  if (!selected.length) selected.push({ idx: record.frames.length - 1, label: 'Finish', detail: 'Final exchange' });
+  const heading = document.createElement('strong');
+  heading.textContent = 'Replay a moment';
+  strip.append(heading);
+  for (const { idx, label, detail } of selected.sort((a, b) => a.idx - b.idx)) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'secondary';
+    button.textContent = '▶ ' + label[0].toUpperCase() + label.slice(1);
+    const caption = document.createElement('small');
+    caption.textContent = detail + ' · t' + record.frames[idx].tick;
+    button.append(caption);
+    button.onclick = () => {
+      if (busy || activeReplay !== record) return;
+      stopReplayTimer();
+      seekReplay(Math.max(0, idx - 8));
+      clipEnd = Math.min(record.frames.length - 1, idx + 5);
+      replayPlaying = true;
+      btnPause.textContent = 'Pause';
+      modeInfo.textContent = 'Slow motion · ' + label;
+      replayTimer = setTimeout(stepReplay, 160);
+    };
+    strip.append(button);
+  }
+}
+
 function seekReplay(idx, isScrub = true) {
   if (!activeReplay) return;
   const frames = activeReplay.frames;
@@ -241,6 +291,12 @@ function seekReplay(idx, isScrub = true) {
 function stepReplay() {
   if (!activeReplay || !replayPlaying) return;
   const frames = activeReplay.frames;
+  if (clipEnd !== null && replayIndex >= clipEnd) {
+    stopReplayTimer();
+    btnPause.textContent = 'Play';
+    modeInfo.textContent = 'Highlight finished';
+    return;
+  }
   if (replayIndex >= frames.length - 1) {
     viewer.setBanner(activeReplay.banner);
     viewer.render(frames[frames.length - 1], 0, false);
@@ -251,7 +307,7 @@ function stepReplay() {
     return;
   }
   replayIndex++;
-  const delay = Math.max(20, getTickDelayMs() || 35);
+  const delay = clipEnd !== null ? 160 : Math.max(20, getTickDelayMs() || 35);
   viewer.setBanner(replayIndex === frames.length - 1 ? activeReplay.banner : '');
   viewer.render(frames[replayIndex], delay, false);
   scrubber.value = String(replayIndex);
@@ -259,6 +315,7 @@ function stepReplay() {
 }
 
 function loadReplay(record) {
+  if (busy) return;
   stopReplayTimer();
   activeReplay = record;
   replayIndex = 0;
@@ -266,6 +323,7 @@ function loadReplay(record) {
   viewer.setBanner('');
   viewer.render(record.frames[0], 0, true);
   renderMarkers(record.frames);
+  renderMoments(record);
   renderStats(record);
   scrubber.disabled = false;
   scrubber.min = '0';
@@ -341,6 +399,7 @@ window.addEventListener('keydown', (e) => {
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
   if (e.code === 'Space') {
+    if (tag === 'BUTTON') return;
     e.preventDefault();
     if (!btnPause.disabled) togglePlayPause();
   } else if (e.code === 'ArrowLeft') {
@@ -438,12 +497,15 @@ async function runGame(teams, seed, gameNumber, { forceInstant = false } = {}) {
   btnNext.disabled = true;
   btnPause.textContent = 'Pause';
   scrubber.disabled = true;
+  get('moments').replaceChildren();
   if (markersEl) markersEl.innerHTML = '';
 
   try {
     for (const team of teams) {
-      status.textContent = `Game ${gameNumber}: Loading ${team.name} (${team.language})…`;
-      const worker = isolate(team);
+      status.textContent = `Game ${gameNumber}: Loading ${team.name} (${team.language ?? 'built-in'})…`;
+      const worker = team.start
+        ? { turn: team.start(game.hello(workers.length + 1)) }
+        : isolate(team);
       workers.push(worker);
       await worker.ready;
     }
@@ -520,7 +582,7 @@ async function runGame(teams, seed, gameNumber, { forceInstant = false } = {}) {
       frames.push(cloned);
     }
   } finally {
-    workers.forEach((worker) => worker.close());
+    workers.forEach((worker) => worker.close?.());
   }
 
   const summary = game.summary();
@@ -529,11 +591,12 @@ async function runGame(teams, seed, gameNumber, { forceInstant = false } = {}) {
   if (!verifyReplay(replay).ok) throw new Error('Replay verification failed.');
 
   const winner = teams[game.result.winner - 1];
+  meta.winner = game.result.winner;
   const banner = winner
     ? `${winner.name} wins! · ${game.result.final_tick} ticks`
     : `Draw · ${game.result.final_tick} ticks`;
   if (frames.length) {
-    viewer.setBanner(banner);
+    viewer.setBanner(banner, game.result.winner);
     viewer.render(frames[frames.length - 1], 50, false);
   }
   const stream = new Blob([encodeReplay(replay)]).stream().pipeThrough(new CompressionStream('gzip'));
@@ -544,7 +607,7 @@ async function runGame(teams, seed, gameNumber, { forceInstant = false } = {}) {
   };
 }
 
-async function playSeries(teamA, teamB, { targetWins = 1, startingSeed, forceInstant = false } = {}) {
+async function playSeries(teamA, teamB, { targetWins = 1, startingSeed, forceInstant = false, panelRound = false } = {}) {
   const pair = [
     { ...teamA, _pairIdx: 0 },
     { ...teamB, _pairIdx: 1 },
@@ -554,9 +617,9 @@ async function playSeries(teamA, teamB, { targetWins = 1, startingSeed, forceIns
   let damageB = 0;
   const seriesGames = [];
   const isFinal = targetWins > 1;
-  games.replaceChildren();
+  if (!panelRound) games.replaceChildren();
 
-  for (let index = 0; index < 8 && Math.max(...wins) < targetWins; index++) {
+  for (let index = 0; index < (panelRound ? 1 : 8) && Math.max(...wins) < targetWins; index++) {
     const seats = index % 2 ? [pair[1], pair[0]] : [pair[0], pair[1]];
     const seed = startingSeed + (isFinal && index < 2 ? 0 : isFinal ? index - 1 : index);
     const { result, file, record } = await runGame(seats, seed, index + 1, { forceInstant });
@@ -575,6 +638,7 @@ async function playSeries(teamA, teamB, { targetWins = 1, startingSeed, forceIns
     downloads.push(url);
     seriesGames.push({ seed, record, url, result, seats });
 
+    const gameNum = panelRound ? games.children.length + 1 : index + 1;
     const item = document.createElement('li');
     const watchBtn = document.createElement('button');
     watchBtn.type = 'button';
@@ -583,10 +647,10 @@ async function playSeries(teamA, teamB, { targetWins = 1, startingSeed, forceIns
     watchBtn.addEventListener('click', () => loadReplay(record));
     const link = document.createElement('a');
     link.href = url;
-    link.download = `game-${index + 1}-seed-${seed}.jsonl.gz`;
+    link.download = `game-${gameNum}-seed-${seed}.jsonl.gz`;
     link.textContent = 'Download .jsonl.gz';
     item.append(
-      `Game ${index + 1} · ${seats[0].name} vs ${seats[1].name} · seed ${seed} · ${winnerSeat ? winnerSeat.name + ' won' : 'draw'} · ${result.final_tick}t `,
+      `Game ${gameNum} · ${seats[0].name} vs ${seats[1].name} · seed ${seed} · ${winnerSeat ? winnerSeat.name + ' won' : 'draw'} · ${result.final_tick}t `,
       watchBtn,
       link,
     );
@@ -604,6 +668,7 @@ async function playSeries(teamA, teamB, { targetWins = 1, startingSeed, forceIns
     activeReplay = lastRecord;
     replayIndex = lastRecord.frames.length - 1;
     renderMarkers(lastRecord.frames);
+    renderMoments(lastRecord);
     renderStats(lastRecord);
     scrubber.disabled = false;
     scrubber.min = '0';
@@ -621,6 +686,19 @@ async function playSeries(teamA, teamB, { targetWins = 1, startingSeed, forceIns
 // =======================
 // SINGLE 1v1 MATCH HANDLER
 // =======================
+const opponentSelect = get('opponent');
+for (const bot of panel) opponentSelect.add(new Option(bot.name + ' · ' + bot.label, bot.key));
+function updateOpponent() {
+  const upload = opponentSelect.value === 'upload';
+  get('opponent-upload').hidden = !upload;
+  get('file-b').disabled = !upload;
+  get('name-b').disabled = !upload;
+  get('format-label').hidden = opponentSelect.value === 'panel';
+  get('run').textContent = opponentSelect.value === 'panel' ? 'Fight all three' : 'Run matchup';
+}
+opponentSelect.addEventListener('change', updateOpponent);
+updateOpponent();
+let lastSingleRun = null;
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (busy) return;
@@ -629,18 +707,52 @@ form.addEventListener('submit', async (event) => {
   activeReplay = null;
   statsBox.style.display = 'none';
   get('run').disabled = true;
+  get('rematch').disabled = true;
+  get('comparison').textContent = '';
   try {
     const names = ['a', 'b'].map((id) => get('name-' + id).value.trim());
-    if (names.some((name) => !name) || names[0] === names[1]) throw new Error('Enter two distinct team names.');
-    const startingSeed = pickMatchSeed();
+    const choice = opponentSelect.value;
+    get('practice-result').textContent = '';
+    if (!names[0] || (choice === 'upload' && (!names[1] || names[0] === names[1]))) throw new Error('Enter two distinct team names.');
+    const rematching = event.submitter === get('rematch') && lastSingleRun;
+    const startingSeed = rematching ? lastSingleRun.seed : pickMatchSeed();
+    seedInput.value = String(startingSeed);
     const targetWins = get('format').value === 'final' ? 2 : 1;
-    const teams = await Promise.all(['a', 'b'].map(async (id, i) => ({
-      id: i + 1,
-      name: names[i],
-      avatar: get('avatar-' + id)?.value || defaultAvatar(i),
-      ...await compile(get('file-' + id).files[0]),
-    })));
-    const outcome = await playSeries(teams[0], teams[1], { targetWins, startingSeed });
+    const player = { id: 1, name: names[0], avatar: get('avatar-a').value, ...await compile(get('file-a').files[0]) };
+    if (choice === 'panel') {
+      games.replaceChildren();
+      let victories = 0;
+      const results = [];
+      for (const bot of panel) {
+        const outcome = await playSeries(player, { ...bot, id: 2 }, { startingSeed, panelRound: true });
+        const result = outcome.games[0].result.winner;
+        if (result === 1) victories++;
+        results.push(bot.name + ' · ' + (result === 1 ? 'win' : result === 2 ? 'loss' : 'draw'));
+        get('practice-result').textContent = results.join('  /  ');
+      }
+      status.textContent = player.name + ' beat ' + victories + ' of ' + panel.length + ' opponents on seed ' + startingSeed + '.';
+      modeInfo.textContent = 'Panel complete';
+      lastSingleRun = { seed: startingSeed, choice };
+      get('rematch').textContent = 'Rematch on seed ' + startingSeed;
+      get('rematch').classList.remove('hidden');
+      return;
+    }
+    let opponent = panel.find(bot => bot.key === choice);
+    if (choice === 'upload') opponent = { name: names[1], avatar: get('avatar-b').value, ...await compile(get('file-b').files[0]) };
+    if (choice === 'mirror') opponent = { ...player, name: player.name + ' (mirror)', avatar: get('avatar-b').value };
+    names[1] = opponent.name;
+    const outcome = await playSeries(player, { ...opponent, id: 2 }, { targetWins, startingSeed });
+    const damage = outcome.games[0].record.stats.fighters.map(f => f.damage_dealt);
+    if (lastSingleRun?.seed === startingSeed && lastSingleRun.choice === choice && lastSingleRun.damage) {
+      const changes = damage.map((value, i) => {
+        const delta = value - lastSingleRun.damage[i];
+        return names[i] + ' ' + (delta > 0 ? '+' : '') + delta;
+      });
+      get('comparison').textContent = 'Opening game damage vs. previous run on this seed · ' + changes.join(' / ');
+    }
+    lastSingleRun = { seed: startingSeed, damage, choice };
+    get('rematch').textContent = 'Rematch on seed ' + startingSeed;
+    get('rematch').classList.remove('hidden');
     status.textContent = (outcome.winner ? outcome.winner.name + ' wins the matchup' : 'No winner after eight games') + ` (${outcome.score[0]}–${outcome.score[1]}).`;
     modeInfo.textContent = 'Match complete';
   } catch (err) {
@@ -649,6 +761,7 @@ form.addEventListener('submit', async (event) => {
   } finally {
     busy = false;
     get('run').disabled = false;
+    get('rematch').disabled = false;
   }
 });
 
