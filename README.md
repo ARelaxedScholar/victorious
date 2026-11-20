@@ -1,4 +1,4 @@
-# Victris Live Match Runner & Tournament Host
+# Victorious
 
 A local, zero-dependency **live 3D/2.5D visualizer and interactive tournament host** for [Victris Arena](https://victrisarena.com/). Drop in standalone TypeScript (`strategy.ts`) or Python (`bot.py`) bots, watch them fight live in your browser with instant replay scrubbing, or run a full multi-team workshop tournament—no `npm install` or Python setup required.
 
