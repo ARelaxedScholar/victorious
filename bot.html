@@ -14,17 +14,42 @@ addEventListener('message', ({ data, ports, source }) => {
   const workerURL = URL.createObjectURL(new Blob([`
     const emit = self.postMessage.bind(self);
     const subscribe = self.addEventListener.bind(self);
+    const jsonStringify = JSON.stringify;
+    const isFiniteNum = Number.isFinite;
+
+    // Lock down dangerous Worker globals before any untrusted code runs
+    function hardenGlobals() {
+      const blocked = ['postMessage', 'Worker', 'SharedWorker', 'BroadcastChannel', 'MessageChannel', 'fetch', 'XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'caches', 'indexedDB'];
+      for (const name of blocked) {
+        try {
+          Object.defineProperty(self, name, {
+            value: undefined,
+            writable: false,
+            configurable: false,
+          });
+        } catch {}
+      }
+    }
+
     self.addEventListener('error', (e) => emit({ error: e.message || 'Worker runtime error.' }));
     self.addEventListener('unhandledrejection', (e) => emit({ error: String(e.reason?.message ?? e.reason ?? 'Unhandled rejection.') }));
+
     async function loadPython() {
       emit({ stage: 'loading Pyodide runtime' });
       const indexURL = ${JSON.stringify(pythonBase.href)};
       importScripts(indexURL + 'pyodide.js');
       const python = await loadPyodide({ indexURL });
+      // Now that Pyodide is loaded, lock down JS Worker globals
+      hardenGlobals();
       emit({ stage: 'evaluating Python strategy' });
       python.globals.set('_source', ${JSON.stringify(python ? data.code : '')});
       python.runPython(\`
 import json, sys, types
+_loads = json.loads
+_dumps = json.dumps
+# Block Python -> JS bridge so untrusted bots cannot touch Worker globals
+for _mod in ("js", "pyodide_js", "pyodide.ffi", "pyodide.http"):
+    sys.modules[_mod] = None
 # The official bot imports the ladder client, but local play calls decide directly.
 sys.modules["websockets"] = types.ModuleType("websockets")
 _scope = {"__name__": "victris_submission"}
@@ -33,41 +58,73 @@ _decide = _scope.get("decide")
 if not callable(_decide):
     raise ValueError("Define decide(obs, match) in your Python submission.")
 def _play(observation, match):
-    return json.dumps(_decide(json.loads(observation), json.loads(match)), allow_nan=False)
+    res = _decide(_loads(observation), _loads(match))
+    if not isinstance(res, dict):
+        raise ValueError("decide() must return a dict.")
+    return _dumps(res, allow_nan=False)
       \`);
       const play = python.globals.get('_play');
-      return (obs, match) => play(JSON.stringify(obs), JSON.stringify(match));
+      return (obs, match) => play(jsonStringify(obs), jsonStringify(match));
     }
+
     (async () => {
       try {
         let serialize;
         if (${python}) {
           serialize = await loadPython();
         } else {
+          hardenGlobals();
           emit({ stage: 'importing TypeScript strategy' });
           const { decide } = await import(${JSON.stringify(moduleURL)});
           if (typeof decide !== 'function') throw new Error('Export decide(obs, match).');
-          serialize = (obs, match) => JSON.stringify(decide(obs, match));
+          serialize = (obs, match) => {
+            const res = decide(obs, match);
+            if (!res || typeof res !== 'object' || Array.isArray(res)) {
+              throw new Error('decide() must return a plain turn object.');
+            }
+            return jsonStringify(res);
+          };
         }
         subscribe('message', ({ data }) => {
+          const seq = data?.seq;
           try {
+            const t0 = performance.now();
             const turn = serialize(data.observation, data.match);
-            if (!turn || turn.length > 4096) throw new Error('Return a turn object under 4096 characters.');
-            emit({ turn });
-          } catch (err) { emit({ error: String(err.message ?? err) }); }
+            const ms = performance.now() - t0;
+            if (typeof turn !== 'string' || !turn || turn.length > 4096) {
+              throw new Error('Return a turn object under 4096 characters.');
+            }
+            emit({ seq, turn, ms: isFiniteNum(ms) ? ms : 0 });
+          } catch (err) {
+            emit({ seq, error: String(err?.message ?? err) });
+          }
         });
         emit({ ready: true });
-      } catch (err) { emit({ error: String(err.message ?? err) }); }
+      } catch (err) {
+        emit({ error: String(err?.message ?? err) });
+      }
     })();
   `], { type: 'text/javascript' }));
+
   try {
     const worker = new Worker(workerURL);
+    const cleanup = () => {
+      try { worker.terminate(); } catch {}
+      try { URL.revokeObjectURL(workerURL); } catch {}
+    };
     worker.onmessage = ({ data }) => port.postMessage(data);
     worker.onerror = (event) => port.postMessage({ error: event.message || 'Worker could not start.' });
     worker.onmessageerror = () => port.postMessage({ error: 'Worker message deserialization failed.' });
-    port.onmessage = ({ data }) => worker.postMessage(data);
+    port.onmessage = ({ data }) => {
+      if (data?.kind === 'close') {
+        cleanup();
+        return;
+      }
+      worker.postMessage(data);
+    };
+    addEventListener('pagehide', cleanup, { once: true });
   } catch (err) {
-    port.postMessage({ error: String(err.message ?? err) });
+    port.postMessage({ error: String(err?.message ?? err) });
   }
 }, { once: true });
 </script>

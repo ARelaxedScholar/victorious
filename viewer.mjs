@@ -762,12 +762,14 @@ export function createArenaViewer(canvas, hudEls, { onEvent } = {}) {
     ctx.stroke();
   }
 
+const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
   function pushFeed(text, accent = '#94a3b8') {
     feedItems.unshift({ text, accent });
     if (feedItems.length > 5) feedItems.pop();
     if (hudEls.feed) {
       hudEls.feed.innerHTML = feedItems
-        .map((it) => `<span class="feed-chip" style="border-color:${it.accent}55;color:${it.accent}">${it.text}</span>`)
+        .map((it) => `<span class="feed-chip" style="border-color:${it.accent}55;color:${it.accent}">${escHtml(it.text)}</span>`)
         .join('');
     }
   }

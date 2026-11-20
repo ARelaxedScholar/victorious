@@ -12,6 +12,54 @@ import {
 } from './tournament.mjs';
 
 const get = (id) => document.getElementById(id);
+const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const VALID_DIRS = new Set(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']);
+const VALID_ATTACKS = new Set(['ranged', 'frostburst', 'repulsor']);
+
+function sanitizeTurn(raw, teamName) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(teamName + ' must return a turn object.');
+  }
+  const clean = {};
+  if (raw.move !== undefined) {
+    if (typeof raw.move !== 'string' || !VALID_DIRS.has(raw.move)) {
+      throw new Error(teamName + ' returned an invalid move direction.');
+    }
+    clean.move = raw.move;
+  }
+  if (raw.dash !== undefined) {
+    if (typeof raw.dash !== 'string' || !VALID_DIRS.has(raw.dash)) {
+      throw new Error(teamName + ' returned an invalid dash direction.');
+    }
+    clean.dash = raw.dash;
+  }
+  if (raw.attack !== undefined) {
+    if (!raw.attack || typeof raw.attack !== 'object' || Array.isArray(raw.attack)) {
+      throw new Error(teamName + ' returned an invalid attack object.');
+    }
+    if (typeof raw.attack.name !== 'string' || !VALID_ATTACKS.has(raw.attack.name)) {
+      throw new Error(teamName + ' returned an unknown attack name.');
+    }
+    const atk = { name: raw.attack.name };
+    if (raw.attack.target !== undefined) {
+      if (
+        !Array.isArray(raw.attack.target) ||
+        raw.attack.target.length !== 2 ||
+        !Number.isFinite(raw.attack.target[0]) ||
+        !Number.isFinite(raw.attack.target[1])
+      ) {
+        throw new Error(teamName + ' returned an invalid attack target.');
+      }
+      atk.target = [Math.trunc(raw.attack.target[0]), Math.trunc(raw.attack.target[1])];
+    }
+    clean.attack = atk;
+  }
+  if (raw.shout !== undefined) {
+    if (typeof raw.shout !== 'string') throw new Error(teamName + ' returned an invalid shout.');
+    clean.shout = raw.shout.slice(0, 40);
+  }
+  return clean;
+}
 const form = get('match');
 const status = get('status');
 const games = get('games');
@@ -210,11 +258,11 @@ function renderStats(record) {
   ];
   statsBox.innerHTML =
     `<div style="font-weight:700;margin-bottom:6px;display:flex;justify-content:space-between">` +
-    `<span class="p1-text">${record.meta.names[0]}</span>` +
+    `<span class="p1-text">${escHtml(record.meta.names[0])}</span>` +
     `<span style="color:#94a3b8;font-size:.75rem">Game ${record.gameNumber} Stats</span>` +
-    `<span class="p2-text">${record.meta.names[1]}</span></div>` +
+    `<span class="p2-text">${escHtml(record.meta.names[1])}</span></div>` +
     `<div class="stats-grid">` +
-    rows.map(([l, lbl, r]) => `<span class="stats-val-l">${l}</span><span class="stats-lbl">${lbl}</span><span class="stats-val-r">${r}</span>`).join('') +
+    rows.map(([l, lbl, r]) => `<span class="stats-val-l">${escHtml(l)}</span><span class="stats-lbl">${escHtml(lbl)}</span><span class="stats-val-r">${escHtml(r)}</span>`).join('') +
     `</div>`;
   statsBox.style.display = 'block';
 }
@@ -441,23 +489,40 @@ function isolate(team) {
   frame.sandbox = 'allow-scripts';
   frame.src = '/bot.html';
   const { port1, port2 } = new MessageChannel();
+  let closed = false;
   const close = () => {
+    if (closed) return;
+    closed = true;
+    try { port1.postMessage({ kind: 'close' }); } catch {}
     port1.close();
     frame.remove();
   };
   let lastStage = 'loading sandbox iframe';
+  let seqCounter = 0;
+  let totalComputeMs = 0;
+  const matchBudgetMs = team.language === 'python' ? 25000 : 15000;
+
   function fail(msg) {
+    close();
     const err = new Error(msg);
     err.faultyBotId = team.id;
     err.faultyTeamName = team.name;
     return err;
   }
-  function receive(send, timeout, phase) {
+  function receive(send, timeout, phase, expectedSeq = null) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(fail(`${team.name} timed out ${phase} (stuck at: ${lastStage}).`)), timeout);
       port1.onmessage = ({ data }) => {
-        if (data?.stage) {
-          lastStage = data.stage;
+        if (data?.stage && expectedSeq === null) {
+          lastStage = String(data.stage).slice(0, 80);
+          return;
+        }
+        if (expectedSeq !== null && data?.seq !== expectedSeq) {
+          // Ignore or reject unsolicited/spoofed messages
+          if (data?.error) {
+            clearTimeout(timer);
+            reject(fail(team.name + ': ' + String(data.error).slice(0, 300)));
+          }
           return;
         }
         clearTimeout(timer);
@@ -479,15 +544,33 @@ function isolate(team) {
   return {
     ready, close,
     async turn(observation, match) {
-      const data = await receive(() => port1.postMessage({ observation, match }), 3000, 'on tick ' + observation.tick);
+      const seq = ++seqCounter;
+      const t0 = performance.now();
+      const data = await receive(
+        () => port1.postMessage({ seq, observation, match }),
+        1000,
+        'on tick ' + observation.tick,
+        seq,
+      );
+      const elapsed = Math.max(performance.now() - t0, Number(data?.ms) || 0);
+      totalComputeMs += elapsed;
+      if (totalComputeMs > matchBudgetMs) {
+        throw fail(`${team.name} exceeded the ${Math.round(matchBudgetMs / 1000)}s total match CPU budget.`);
+      }
       if (typeof data?.turn !== 'string' || data.turn.length > 4096) {
         throw fail(team.name + ' returned an invalid turn.');
       }
-      const turn = JSON.parse(data.turn);
-      if (!turn || typeof turn !== 'object' || Array.isArray(turn)) {
-        throw fail(team.name + ' must return a turn object.');
+      let parsed;
+      try {
+        parsed = JSON.parse(data.turn);
+      } catch {
+        throw fail(team.name + ' returned malformed JSON.');
       }
-      return turn;
+      try {
+        return sanitizeTurn(parsed, team.name);
+      } catch (err) {
+        throw fail(err.message);
+      }
     },
   };
 }
@@ -936,7 +1019,7 @@ function renderTournamentBoard() {
     championSlot.innerHTML =
       `<div class="champion-banner">` +
       `<div class="champ-title">🏆 Tournament Champion</div>` +
-      `<div class="champ-name">${tourney.champion.name}</div>` +
+      `<div class="champ-name">${escHtml(tourney.champion.name)}</div>` +
       `</div>`;
   } else {
     championSlot.innerHTML = '';
@@ -949,7 +1032,7 @@ function renderTournamentBoard() {
       `<h3>Standings (Top 2 → Bo3 Final)</h3>` +
       `<table class="standings"><thead><tr><th>#</th><th>Team</th><th>W–L</th><th>Dmg</th></tr></thead><tbody>` +
       rows.map((t, i) =>
-        `<tr class="${i < 2 ? 'top2' : ''}"><td>${i + 1}</td><td>${t.name}</td><td>${t.wins}–${t.losses}${t.draws ? `–${t.draws}` : ''}</td><td>${t.damageDealt}</td></tr>`,
+        `<tr class="${i < 2 ? 'top2' : ''}"><td>${i + 1}</td><td>${escHtml(t.name)}</td><td>${t.wins}–${t.losses}${t.draws ? `–${t.draws}` : ''}</td><td>${t.damageDealt}</td></tr>`,
       ).join('') +
       `</tbody></table>`;
   } else {
@@ -979,9 +1062,9 @@ function renderTournamentBoard() {
       top.className = 'match-top';
       const left = document.createElement('span');
       left.innerHTML =
-        `<span class="${m.winner === m.teamA && m.teamA ? 'win-name' : ''}">${nameA}</span>` +
+        `<span class="${m.winner === m.teamA && m.teamA ? 'win-name' : ''}">${escHtml(nameA)}</span>` +
         ` <span style="color:#64748b">vs</span> ` +
-        `<span class="${m.winner === m.teamB && m.teamB ? 'win-name' : ''}">${nameB}</span>`;
+        `<span class="${m.winner === m.teamB && m.teamB ? 'win-name' : ''}">${escHtml(nameB)}</span>`;
       const right = document.createElement('span');
       right.style.color = m.status === 'done' ? '#4ade80' : '#94a3b8';
       right.textContent = scoreText;
